@@ -22,6 +22,7 @@ export interface Seed {
     source_url?: string;
     trigger_detected?: string;
     excerpt?: string;
+    raw_content?: string;
     collected_at: string;
     processed?: boolean;
     // Addendum §6: LinkedIn seed fields

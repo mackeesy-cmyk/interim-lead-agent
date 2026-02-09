@@ -689,3 +689,73 @@ export async function fetchBrregUpdates(days: number = 2): Promise<BrregUpdateRe
     console.log(`📊 Brreg Update Monitor: ${results.length} signals found`);
     return results;
 }
+
+/**
+ * Enriches a sparse Brreg signal with contextual details for better AI summaries
+ * Takes raw seed data and Brreg company data, returns detailed narrative text
+ */
+export function enrichBrregSeed(seed: any, enhet: BrregCompany | null): string {
+    if (!enhet) {
+        return seed.raw_content || seed.excerpt || 'Statusendring registrert i Brønnøysund.';
+    }
+
+    const parts: string[] = [];
+
+    // 1. Status change details
+    if (seed.source_type === 'brreg_status_update') {
+        const changeDate = new Date(seed.created_at || Date.now()).toLocaleDateString('nb-NO', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+        });
+
+        let statusDescription = 'endret status';
+        if (enhet.konkurs) statusDescription = 'gikk konkurs';
+        else if (enhet.underAvvikling) statusDescription = 'er under avvikling';
+        else if (enhet.underTvangsavviklingEllerTvangsopplosning) statusDescription = 'er under tvangsavvikling';
+
+        parts.push(`Selskapet ${enhet.navn} ${statusDescription} den ${changeDate}.`);
+    } else if (seed.source_type === 'brreg_role_change') {
+        parts.push(`${enhet.navn} har gjennomført rolleendringer i ledelsen.`);
+    } else {
+        parts.push(`${enhet.navn} er registrert med endringer i Brønnøysundregistrene.`);
+    }
+
+    // 2. Company context - industry
+    if (enhet.naeringskode1?.beskrivelse) {
+        parts.push(`Selskapet opererer innen ${enhet.naeringskode1.beskrivelse.toLowerCase()}.`);
+    }
+
+    // 3. Company size
+    if (enhet.antallAnsatte !== undefined && enhet.antallAnsatte !== null) {
+        if (enhet.antallAnsatte === 0) {
+            parts.push(`Selskapet har ingen registrerte ansatte.`);
+        } else if (enhet.antallAnsatte === 1) {
+            parts.push(`Selskapet har 1 ansatt.`);
+        } else {
+            parts.push(`Selskapet har ${enhet.antallAnsatte} ansatte.`);
+        }
+    }
+
+    // 4. Role change details (if applicable and present in metadata)
+    if (seed.source_type === 'brreg_role_change' && seed.excerpt) {
+        parts.push(seed.excerpt);
+    }
+
+    // 5. Location context
+    const location = enhet.forretningsadresse?.kommune
+        || enhet.forretningsadresse?.poststed
+        || 'Oslo-området';
+    parts.push(`Selskapet er lokalisert i ${location}.`);
+
+    // 6. Company age (if available)
+    if (enhet.stiftelsesdato) {
+        const founded = new Date(enhet.stiftelsesdato);
+        const yearsOld = new Date().getFullYear() - founded.getFullYear();
+        if (yearsOld > 0) {
+            parts.push(`Selskapet ble stiftet for ${yearsOld} år siden.`);
+        }
+    }
+
+    return parts.join(' ');
+}

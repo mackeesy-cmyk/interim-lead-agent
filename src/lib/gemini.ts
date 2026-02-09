@@ -72,6 +72,9 @@ function cleanJson(text: string): string {
         clean = clean.substring(start, end + 1);
     }
 
+    // 3. Remove trailing commas which break JSON.parse
+    clean = clean.replace(/,\s*([\]}])/g, '$1');
+
     return clean;
 }
 
@@ -229,8 +232,10 @@ Case ${i + 1} (${c.company_name}):
 `).join('\n');
 
     const prompt = `
-Lag et ekstremt kort sammendrag (maks 1 setning) på norsk av nyhetssaken for hvert selskap.
+Lag et ekstremt kort sammendrag (maks 1 setning) på norsk av nyhetssaken for hvert selskap. 
 Sammendraget skal være nøkternt og beskrive selve hendelsen.
+
+VIKTIG: Svar med KOMPLETT og VALID JSON. Ikke avbryt midt i.
 
 CASES:
 ${caseSummaries}
@@ -249,26 +254,32 @@ Respond ONLY with valid JSON:
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: {
                 temperature: 0.1,
-                maxOutputTokens: 2048,
+                maxOutputTokens: 4096,
                 responseMimeType: 'application/json',
             },
         });
 
         const responseText = result.response.text();
         const jsonStr = cleanJson(responseText);
-        const parsed = JSON.parse(jsonStr);
 
-        const results = new Map<string, string>();
-        cases.forEach((c) => {
-            const orgNr = c.org_number.replace(/\s/g, '');
-            const match = parsed.summaries?.find((w: any) =>
-                (w.org_number && w.org_number.replace(/\s/g, '') === orgNr) ||
-                (w.company_name && w.company_name === c.company_name)
-            );
-            results.set(c.org_number, match?.summary || '');
-        });
+        try {
+            const parsed = JSON.parse(jsonStr);
 
-        return results;
+            const results = new Map<string, string>();
+            cases.forEach((c) => {
+                const orgNr = c.org_number.replace(/\s/g, '');
+                const match = parsed.summaries?.find((w: any) =>
+                    (w.org_number && w.org_number.replace(/\s/g, '') === orgNr) ||
+                    (w.company_name && w.company_name === c.company_name)
+                );
+                results.set(c.org_number, match?.summary || '');
+            });
+
+            return results;
+        } catch (e) {
+            console.error('Failed to parse Gemini summary JSON. Raw response:', responseText);
+            throw e;
+        }
     } catch (error) {
         console.error('Gemini Summary generation failed:', error);
         return new Map();

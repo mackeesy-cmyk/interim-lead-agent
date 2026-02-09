@@ -15,3 +15,6 @@ if (missing.length > 0) {
     `Check your .env.local file.`
   );
 }
+
+// Export to make this a proper module
+export const envValidated = true;

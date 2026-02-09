@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchDNRSS, preFilterItems } from '@/lib/rss';
-import { searchBankruptcies, fetchKunngjoringer, fetchBrregUpdates, verifyCompany } from '@/lib/bronnysund';
+import { searchBankruptcies, fetchKunngjoringer, fetchBrregUpdates, verifyCompany, enrichBrregSeed, CachedBrregLookup } from '@/lib/bronnysund';
 import { detectTriggers } from '@/lib/gemini';
 import { createSeed, checkDuplicate } from '@/lib/airtable';
 import { scrapeUrl, resetFirecrawlBudget, getFirecrawlStats } from '@/lib/firecrawl';
@@ -91,6 +91,13 @@ export async function GET(request: NextRequest) {
             try {
                 const updates = await fetchBrregUpdates(2);
 
+                // Batch lookup company data for enrichment
+                const brregLookup = new CachedBrregLookup();
+                const orgNumbers = updates.map(u => u.org_number).filter(Boolean);
+                const companyDataMap = orgNumbers.length > 0
+                    ? await brregLookup.batchLookup(orgNumbers)
+                    : new Map();
+
                 for (const update of updates) {
                     try {
                         const isDuplicate = await checkDuplicate(update.org_number || update.company_name);
@@ -103,6 +110,17 @@ export async function GET(request: NextRequest) {
                             ? 'brreg_role_change'
                             : 'brreg_status_update';
 
+                        // Enrich the seed with detailed context
+                        const companyData = companyDataMap.get(update.org_number) || null;
+                        const enrichedContent = enrichBrregSeed(
+                            {
+                                source_type: sourceType,
+                                excerpt: update.excerpt,
+                                created_at: update.update_date,
+                            },
+                            companyData
+                        );
+
                         await createSeed({
                             company_name: update.company_name,
                             org_number: update.org_number,
@@ -110,6 +128,7 @@ export async function GET(request: NextRequest) {
                             source_url: update.source_url,
                             trigger_detected: update.trigger_category,
                             excerpt: update.excerpt.slice(0, 500),
+                            raw_content: enrichedContent,
                             collected_at: new Date().toISOString(),
                             processed: false,
                         });

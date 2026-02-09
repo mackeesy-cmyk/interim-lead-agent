@@ -70,6 +70,53 @@ export default async function Home() {
     );
 }
 
+function SourceBadge({ type }: { type: string }) {
+    const config: Record<string, { icon: string; color: string }> = {
+        newsweb: { icon: '📰', color: 'bg-blue-500' },
+        brreg_status_update: { icon: '📋', color: 'bg-emerald-500' },
+        brreg_role_change: { icon: '👤', color: 'bg-teal-500' },
+        bronnysund: { icon: '⚖️', color: 'bg-red-500' },
+        brreg_kunngjoringer: { icon: '📄', color: 'bg-emerald-600' },
+        finn: { icon: '💼', color: 'bg-purple-500' },
+        dn_rss: { icon: '📡', color: 'bg-amber-500' },
+        e24_rss: { icon: '📡', color: 'bg-orange-500' },
+        finansavisen_rss: { icon: '📡', color: 'bg-yellow-500' },
+        linkedin_exec: { icon: '🔗', color: 'bg-blue-600' },
+        linkedin_signal: { icon: '🔗', color: 'bg-blue-400' },
+    };
+
+    const { icon, color } = config[type] || { icon: '📌', color: 'bg-slate-500' };
+
+    return (
+        <span className={`w-7 h-7 ${color} rounded-lg flex items-center justify-center text-sm shadow-sm`}>
+            {icon}
+        </span>
+    );
+}
+
+function BrregEnrichmentDisplay({ lead }: { lead: CaseFile }) {
+    const eventType = lead.source_type === 'brreg_status_update' ? 'Statusendring' : 'Rolleendring';
+    const eventDate = lead.created_at
+        ? new Date(lead.created_at).toLocaleDateString('nb-NO', { day: 'numeric', month: 'short', year: 'numeric' })
+        : 'Nylig';
+
+    return (
+        <div className="flex items-center gap-2 p-2 bg-blue-50/30 rounded-lg border border-blue-100/50 mb-2">
+            <div className="flex items-center gap-2 px-3 py-1 bg-blue-500 text-white rounded-md">
+                <span className="text-lg">📋</span>
+                <span className="text-xs font-bold uppercase tracking-wide">{eventType}</span>
+            </div>
+            <div className="flex flex-col">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-tight">Registrert</span>
+                <span className="text-xs font-bold text-slate-700">{eventDate}</span>
+            </div>
+            <div className="ml-auto px-3 py-1 bg-emerald-50 text-emerald-700 rounded-md">
+                <span className="text-[10px] font-black uppercase tracking-wide">Offentlig register</span>
+            </div>
+        </div>
+    );
+}
+
 function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
     return (
         <div
@@ -148,6 +195,7 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
                         <div>
                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Kilde</span>
                             <div className="flex items-center gap-2">
+                                <SourceBadge type={lead.source_type || ''} />
                                 <span className="text-slate-600 font-medium text-sm">
                                     {formatSourceType(lead.source_type)}
                                 </span>
@@ -168,6 +216,12 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
 
                         <div>
                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Hvorfor nå?</span>
+
+                            {/* Show structured data for Brreg sources */}
+                            {(lead.source_type === 'brreg_status_update' || lead.source_type === 'brreg_role_change') && (
+                                <BrregEnrichmentDisplay lead={lead} />
+                            )}
+
                             <p className="text-slate-800 text-base leading-relaxed font-semibold italic">
                                 "{lead.why_now_text || 'Analyse under utførelse. Systemet venter på mer kontekst.'}"
                             </p>
@@ -201,7 +255,7 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
 
                 <div className="flex items-end justify-between pt-6 border-t border-slate-100">
                     <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">
-                        Ref: {lead.id?.slice(-8).toUpperCase()} • Identifisert {new Date(lead.created_at!).toLocaleDateString('nb-NO')}
+                        Ref: {lead.id?.slice(-8).toUpperCase()} • Identifisert {lead.created_at ? formatRelativeTime(lead.created_at) : 'nylig'}
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
@@ -276,6 +330,17 @@ function FeedbackBtn({ leadId, grade, current, color }: { leadId: string; grade:
 }
 
 // Helpers
+function formatRelativeTime(date: string): string {
+    const now = new Date();
+    const then = new Date(date);
+    const hours = Math.floor((now.getTime() - then.getTime()) / 3600000);
+
+    if (hours < 1) return 'for <1t siden';
+    if (hours < 24) return `for ${hours}t siden`;
+    if (hours < 48) return 'i går';
+    return then.toLocaleDateString('nb-NO', { day: 'numeric', month: 'short' });
+}
+
 function translateTrigger(trigger: string): string {
     const mapping: Record<string, string> = {
         LeadershipChange: 'Lederskifte',
