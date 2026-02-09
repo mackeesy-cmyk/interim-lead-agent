@@ -22,7 +22,7 @@ export default async function Home() {
                             Live Overvåking
                         </div>
                         <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight">
-                            Intelligence <span className="text-blue-600">Dashbord</span>
+                            Markeds<span className="text-blue-600">innsikt</span>
                         </h1>
                         <p className="text-slate-500 text-lg max-w-2xl font-medium">
                             Kvalifiserte markedssignaler og interim-muligheter identifisert av AI.

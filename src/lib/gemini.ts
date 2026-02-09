@@ -215,6 +215,66 @@ export async function generateWhyNowBatch(
     }
 }
 
+// ============================================
+// BATCH SUMMARY GENERATION
+// ============================================
+export async function generateSummaryBatch(
+    cases: ScoredCase[]
+): Promise<Map<string, string>> {
+    if (cases.length === 0) return new Map();
+
+    const caseSummaries = cases.map((c, i) => `
+Case ${i + 1} (${c.company_name}):
+- Content: ${truncate(c.seed.raw_content || c.seed.excerpt, 500)}
+`).join('\n');
+
+    const prompt = `
+Lag et ekstremt kort sammendrag (maks 1 setning) på norsk av nyhetssaken for hvert selskap.
+Sammendraget skal være nøkternt og beskrive selve hendelsen.
+
+CASES:
+${caseSummaries}
+
+Respond ONLY with valid JSON:
+{
+  "summaries": [
+    { "org_number": "...", "company_name": "...", "summary": "Kort oppsummering..." },
+    ...
+  ]
+}
+`;
+
+    try {
+        const result = await model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 2048,
+                responseMimeType: 'application/json',
+            },
+        });
+
+        const responseText = result.response.text();
+        const jsonStr = cleanJson(responseText);
+        const parsed = JSON.parse(jsonStr);
+
+        const results = new Map<string, string>();
+        cases.forEach((c) => {
+            const orgNr = c.org_number.replace(/\s/g, '');
+            const match = parsed.summaries?.find((w: any) =>
+                (w.org_number && w.org_number.replace(/\s/g, '') === orgNr) ||
+                (w.company_name && w.company_name === c.company_name)
+            );
+            results.set(c.org_number, match?.summary || '');
+        });
+
+        return results;
+    } catch (error) {
+        console.error('Gemini Summary generation failed:', error);
+        return new Map();
+    }
+}
+
 function buildWhyNowBatchPrompt(cases: ScoredCase[], feedback: any[] = []): string {
     const caseSummaries = cases.map((c, i) => `
 Case ${i + 1} (${c.company_name}):

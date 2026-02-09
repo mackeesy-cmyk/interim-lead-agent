@@ -8,7 +8,7 @@ import {
     checkDuplicate,
 } from '@/lib/airtable';
 import { CachedBrregLookup } from '@/lib/bronnysund';
-import { batchProcessSeeds, generateWhyNowBatch } from '@/lib/gemini';
+import { batchProcessSeeds, generateWhyNowBatch, generateSummaryBatch } from '@/lib/gemini';
 import { searchCorroboration } from '@/lib/search';
 import { scrapeUrl } from '@/lib/firecrawl';
 import { getScoringWeights } from '@/config/scoring-config';
@@ -191,11 +191,15 @@ export async function POST(request: NextRequest) {
         );
         const cappedQualified = sortedQualified.slice(0, maxLeads);
 
-        // 7. BATCH generer Why Now for ALLE kvalifiserte i denne batchen
+        // 7. BATCH generer Why Now og Oppsummering for ALLE kvalifiserte i denne batchen
         let whyNowTexts: Map<string, string> = new Map();
+        let summaries: Map<string, string> = new Map();
         if (qualified.length > 0) {
-            whyNowTexts = await generateWhyNowBatch(qualified);
-            apiCallsUsed.gemini++;
+            [whyNowTexts, summaries] = await Promise.all([
+                generateWhyNowBatch(qualified),
+                generateSummaryBatch(qualified)
+            ]);
+            apiCallsUsed.gemini += 2;
         }
 
         // 8. Update Airtable in batches
@@ -222,7 +226,7 @@ export async function POST(request: NextRequest) {
                     is_ostlandet: c.verification.is_ostlandet,
                     has_operations: c.verification.has_operations,
                     source_type: c.seed.source_type,
-                    case_summary: c.seed.excerpt || c.seed.raw_content?.slice(0, 500) || '',
+                    case_summary: summaries.get(c.org_number) || c.seed.excerpt || c.seed.raw_content?.slice(0, 500) || '',
                 };
             }));
             logger.info(`✅ batchCreateCaseFiles completed for ${scoredCases.length} records`, { mode, component: 'process-esl' });
@@ -295,18 +299,18 @@ export async function POST(request: NextRequest) {
 
 function mapTriggerToRole(trigger: string): string {
     const mapping: Record<string, string> = {
-        LeadershipChange: 'CEO',
-        Restructuring: 'CFO',
-        MergersAcquisitions: 'CEO',
-        StrategicReview: 'CEO',
-        OperationalCrisis: 'COO',
-        RegulatoryLegal: 'CEO',
-        CostProgram: 'CFO',
-        HiringSignal: 'CEO',
-        OwnershipGovernance: 'CFO',
-        TransformationProgram: 'COO',
+        LeadershipChange: 'Daglig leder',
+        Restructuring: 'Økonomisjef',
+        MergersAcquisitions: 'Daglig leder',
+        StrategicReview: 'Daglig leder',
+        OperationalCrisis: 'Driftsdirektør',
+        RegulatoryLegal: 'Daglig leder',
+        CostProgram: 'Økonomisjef',
+        HiringSignal: 'Daglig leder',
+        OwnershipGovernance: 'Økonomisjef',
+        TransformationProgram: 'Driftsdirektør',
     };
-    return mapping[trigger] || 'CEO';
+    return mapping[trigger] || 'Daglig leder';
 }
 
 // Allow GET for testing
