@@ -1,0 +1,8 @@
+case_file,source_type,source_url,title,excerpt,keywords_matched,delta_E,delta_W,delta_R,is_corroborating,fetched_at
+,bronnysund,https://brreg.no/example1,Konkurs announcement,Company filed for bankruptcy,"konkurs,restrukturering",0.2,0.15,0,true,2026-02-04
+,dn_rss,https://dn.no/example2,CEO resignation,CEO resigned effective immediately,"CEO,fratrådt,avgått",0.15,0.2,0,true,2026-02-04
+,newsweb,https://newsweb.no/example3,Stock exchange filing,Company announces strategic review,"strategisk,gjennomgang,alternativer",0.1,0.1,0,true,2026-02-04
+,mynewsdesk,https://mynewsdesk.com/example4,Press release,Company announces restructuring,"omstrukturering,nedbemanning",0.1,0.1,0.05,false,2026-02-04
+,finn,https://finn.no/example5,Job posting,CFO position available,"CFO,finansdirektør,stilling",0.05,0.1,0.1,false,2026-02-04
+,proff,https://proff.no/example6,Company profile,Financial data indicates issues,"underskudd,likviditet",-0.05,0,0.1,false,2026-02-04
+,other,https://company.no/example7,About page,Leadership page shows vacancy,"leder,vakant",0.1,0.15,0,true,2026-02-04

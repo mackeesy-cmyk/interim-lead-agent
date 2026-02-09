@@ -1,0 +1,11 @@
+company_name,org_number,trigger_hypothesis,secondary_triggers,E,W,V,R,C,stars,status,why_now_text,suggested_role,sources_checked,iteration_count,is_ostlandet,has_operations,created_at,qualified_at,report_date,last_surfaced,seeds,evidence
+Example Pending,111111111,LeadershipChange,,0.3,0.3,0,0.2,0,0,pending,,CEO,bronnysund,0,true,true,2026-02-04,,,,,
+Example Processing,222222222,Restructuring,CostProgram,0.5,0.5,0.5,0.2,0.4,2,processing,,CFO,"bronnysund,proff",1,true,true,2026-02-04,,,,,
+Example Qualified 1,333333333,MergersAcquisitions,"StrategicReview,OwnershipGovernance",0.8,0.7,1,0.1,0.7,4,qualified,CEO left suddenly with M&A in progress,CEO,"bronnysund,news_search,company_website",3,true,true,2026-02-04,2026-02-04,2026-02-04,2026-02-04,,
+Example Dropped,444444444,StrategicReview,,0.3,0.2,1,0.6,0.2,1,dropped,Not in Østlandet,Other,bronnysund,1,false,true,2026-02-04,,,,,
+Example Qualified 2,555555555,CostProgram,Restructuring,0.7,0.6,1,0.2,0.6,3,qualified,Major cost program requires interim CFO,CFO,"bronnysund,proff",2,true,true,2026-02-04,2026-02-04,2026-02-04,,,
+Example Qualified 3,666666666,OperationalCrisis,,0.8,0.8,1,0.1,0.75,4,qualified,Operational crisis needs interim COO,COO,"news_search,company_website",2,true,true,2026-02-04,2026-02-04,2026-02-04,,,
+Example CTO,777777777,TransformationProgram,HiringSignal,0.7,0.7,1,0.15,0.65,4,qualified,Digital transformation needs CTO,CTO,"proff,company_website",2,true,true,2026-02-04,2026-02-04,2026-02-04,,,
+Example Legal,888888888,RegulatoryLegal,,0.6,0.5,1,0.3,0.5,3,qualified,Legal issues require steady leadership,CEO,bronnysund,1,true,true,2026-02-04,2026-02-04,2026-02-04,,,
+Example Ownership,999999999,OwnershipGovernance,MergersAcquisitions,0.6,0.6,1,0.2,0.55,3,qualified,Ownership change requires CFO support,CFO,proff,1,true,true,2026-02-04,2026-02-04,2026-02-04,,,
+Example Hiring,101010101,HiringSignal,LeadershipChange,0.5,0.5,1,0.25,0.45,2,processing,,CEO,"bronnysund,news_search",1,true,true,2026-02-04,,,,,

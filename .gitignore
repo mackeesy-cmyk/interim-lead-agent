@@ -1,0 +1,28 @@
+# Interim Lead Agent
+
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# Vercel
+.vercel
+
+# Debug
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

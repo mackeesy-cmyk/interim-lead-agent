@@ -1,0 +1,11 @@
+company_name,org_number,source_type,source_url,trigger_detected,excerpt,collected_at,processed,case_file
+Example 1,111111111,bronnysund,https://example.com/1,LeadershipChange,CEO departed example,2026-02-04,false,
+Example 2,222222222,dn_rss,https://example.com/2,Restructuring,Bankruptcy filing example,2026-02-04,false,
+Example 3,333333333,newsweb,https://example.com/3,MergersAcquisitions,Acquisition announced example,2026-02-04,false,
+Example 4,444444444,mynewsdesk,https://example.com/4,StrategicReview,Strategic alternatives example,2026-02-04,false,
+Example 5,555555555,finn,https://example.com/5,OperationalCrisis,Production halt example,2026-02-04,false,
+Example 6,666666666,proff,https://example.com/6,RegulatoryLegal,Investigation announced example,2026-02-04,false,
+Example 7,777777777,other,https://example.com/7,CostProgram,Layoffs announced example,2026-02-04,false,
+Example 8,888888888,bronnysund,https://example.com/8,HiringSignal,CFO position open example,2026-02-04,false,
+Example 9,999999999,dn_rss,https://example.com/9,OwnershipGovernance,Board change example,2026-02-04,false,
+Example 10,101010101,newsweb,https://example.com/10,TransformationProgram,ERP implementation example,2026-02-04,false,
