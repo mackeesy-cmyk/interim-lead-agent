@@ -129,10 +129,45 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
                         <div className="p-1 px-2 rounded-md bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest">AI Insights</div>
                         <div className="h-px flex-grow bg-slate-200/60"></div>
                     </div>
-                    <p className="text-slate-800 text-base md:text-lg leading-relaxed font-semibold italic">
-                        "{lead.why_now_text || 'Analyse under utførelse. Systemet venter på mer kontekst.'}"
-                    </p>
-                    <div className="absolute right-4 bottom-4 opacity-5">
+
+                    <div className="space-y-4">
+                        <div>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Case Summary</span>
+                            <p className="text-slate-900 font-bold">
+                                {translateTrigger(lead.trigger_hypothesis || 'LeadershipChange')}
+                            </p>
+                        </div>
+
+                        <div>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Source</span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-slate-600 font-medium text-sm">
+                                    {formatSourceType(lead.source_type)}
+                                </span>
+                                {lead.source_url && (
+                                    <a
+                                        href={lead.source_url}
+                                        target="_blank"
+                                        className="text-blue-600 hover:text-blue-800 text-[10px] font-bold flex items-center gap-0.5 group/link"
+                                    >
+                                        Les original
+                                        <svg className="w-3 h-3 transition-transform group-hover/link:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                        </svg>
+                                    </a>
+                                )}
+                            </div>
+                        </div>
+
+                        <div>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Why Now</span>
+                            <p className="text-slate-800 text-base leading-relaxed font-semibold italic">
+                                "{lead.why_now_text || 'Analyse under utførelse. Systemet venter på mer kontekst.'}"
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="absolute right-4 bottom-4 opacity-5 pointer-events-none">
                         <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24"><path d="M14.017 21L14.017 18C14.017 16.8954 14.9124 16 16.017 16H19.017C19.5693 16 20.017 15.5523 20.017 15V9C20.017 8.44772 19.5693 8 19.017 8H16.017C14.9124 8 14.017 7.10457 14.017 6V3L14.017 3C14.017 1.89543 14.9124 1 16.017 1H19.017C21.2261 1 23.017 2.79086 23.017 5V15C23.017 18.3137 20.3307 21 17.017 21H14.017ZM1.017 21L1.017 18C1.017 16.8954 1.91243 16 3.017 16H6.017C6.56928 16 7.017 15.5523 7.017 15V9C7.017 8.44772 6.56928 8 6.017 8H3.017C1.91243 8 1.017 7.10457 1.017 6V3L1.017 3C1.017 1.89543 1.91243 1 3.017 1H6.017C8.22614 1 10.017 2.79086 10.017 5V15C10.017 18.3137 7.33072 21 4.017 21H1.017Z" /></svg>
                     </div>
                 </div>
@@ -231,4 +266,36 @@ function FeedbackBtn({ leadId, grade, current, color }: { leadId: string; grade:
             </button>
         </form>
     );
+}
+
+// Helpers
+function translateTrigger(trigger: string): string {
+    const mapping: Record<string, string> = {
+        LeadershipChange: 'Lederskifte',
+        Restructuring: 'Omstrukturering',
+        MergersAcquisitions: 'Oppkjøp & Fusjoner',
+        StrategicReview: 'Strategisk Gjennomgang',
+        OperationalCrisis: 'Operasjonell Krise',
+        RegulatoryLegal: 'Regulatoriske Endringer',
+        CostProgram: 'Kostnadsprogram',
+        HiringSignal: 'Rekrutteringssignal',
+        OwnershipGovernance: 'Eierstyring',
+        TransformationProgram: 'Transformasjon',
+    };
+    return mapping[trigger] || trigger;
+}
+
+function formatSourceType(source: string | undefined): string {
+    if (!source) return 'Ukjent kilde';
+    const mapping: Record<string, string> = {
+        dn_rss: 'Dagens Næringsliv',
+        e24_rss: 'E24',
+        finansavisen_rss: 'Finansavisen',
+        newsweb: 'NewsWeb (Oslo Børs)',
+        brreg_update: 'Brønnøysundregistrene',
+        finn: 'FINN.no',
+        linkedin_exec: 'LinkedIn (Move)',
+        linkedin_signal: 'LinkedIn (Signal)',
+    };
+    return mapping[source] || source;
 }
