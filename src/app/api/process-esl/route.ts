@@ -23,7 +23,7 @@ export const maxDuration = 300; // 5 minutes max
 // ESL+ THRESHOLDS (per Addendum v1.0)
 // ============================================
 const THRESHOLDS = {
-    C_MIN: 0.50,          // Minimum C for qualification (lowered to increase volume)
+    C_MIN: 0.60,          // Minimum C for qualification (Addendum §3)
     MAX_ITERATIONS: 5,
 };
 
@@ -35,9 +35,9 @@ function computeC(E: number, W: number, V: number, R: number): number {
 }
 
 function computeStars(C: number): number {
-    if (C >= 0.70) return 3;
-    if (C >= 0.60) return 2;
-    if (C >= 0.50) return 1;
+    if (C >= 0.75) return 3;
+    if (C >= 0.65) return 2;
+    if (C >= 0.60) return 1;
     return 0;
 }
 
