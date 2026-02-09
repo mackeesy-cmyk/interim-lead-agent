@@ -105,13 +105,22 @@ export async function batchProcessSeeds(
         const jsonStr = cleanJson(responseText);
         const scores = JSON.parse(jsonStr);
 
-        return cases.map((c, index) => ({
-            ...c,
-            E: scores.cases?.[index]?.E ?? c.E,
-            W: scores.cases?.[index]?.W ?? c.W,
-            R: scores.cases?.[index]?.R ?? c.R,
-            gemini_reasoning: scores.cases?.[index]?.reasoning,
-        }));
+        return cases.map((c) => {
+            const orgNr = c.org_number.replace(/\s/g, '');
+            // Find score by org number or company name as fallback
+            const score = scores.cases?.find((s: any) =>
+                (s.org_number && s.org_number.replace(/\s/g, '') === orgNr) ||
+                (s.company_name && s.company_name === c.company_name)
+            );
+
+            return {
+                ...c,
+                E: score?.E ?? c.E,
+                W: score?.W ?? c.W,
+                R: score?.R ?? c.R,
+                gemini_reasoning: score?.reasoning || 'No reasoning provided by AI',
+            };
+        });
     } catch (error) {
         console.error('Gemini batch scoring failed:', error);
         return cases as ScoredCase[];
@@ -157,7 +166,7 @@ ${caseSummaries}
 Respond ONLY with valid JSON:
 {
   "cases": [
-    { "E": 0.75, "W": 0.60, "R": 0.20, "reasoning": "Brief explanation" },
+    { "org_number": "9-digits", "company_name": "...", "E": 0.75, "W": 0.60, "R": 0.20, "reasoning": "Brief explanation" },
     ...
   ]
 }
@@ -190,8 +199,13 @@ export async function generateWhyNowBatch(
         const parsed = JSON.parse(jsonStr);
 
         const results = new Map<string, string>();
-        qualifiedCases.forEach((c, i) => {
-            results.set(c.org_number, parsed.why_now?.[i] || '');
+        qualifiedCases.forEach((c) => {
+            const orgNr = c.org_number.replace(/\s/g, '');
+            const match = parsed.why_now?.find((w: any) =>
+                (w.org_number && w.org_number.replace(/\s/g, '') === orgNr) ||
+                (w.company_name && w.company_name === c.company_name)
+            );
+            results.set(c.org_number, match?.message || match || '');
         });
 
         return results;
@@ -219,7 +233,7 @@ ${caseSummaries}
 Respond ONLY with valid JSON:
 {
   "why_now": [
-    "Message for case 1...",
+    { "org_number": "...", "company_name": "...", "message": "Message in Norwegian..." },
     ...
   ]
 }

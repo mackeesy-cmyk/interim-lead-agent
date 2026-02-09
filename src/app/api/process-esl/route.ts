@@ -191,10 +191,10 @@ export async function POST(request: NextRequest) {
         );
         const cappedQualified = sortedQualified.slice(0, maxLeads);
 
-        // 7. BATCH generer Why Now (no feedback injection per Addendum §5)
+        // 7. BATCH generer Why Now for ALLE kvalifiserte i denne batchen
         let whyNowTexts: Map<string, string> = new Map();
-        if (cappedQualified.length > 0) {
-            whyNowTexts = await generateWhyNowBatch(cappedQualified);
+        if (qualified.length > 0) {
+            whyNowTexts = await generateWhyNowBatch(qualified);
             apiCallsUsed.gemini++;
         }
 
@@ -202,7 +202,7 @@ export async function POST(request: NextRequest) {
         if (scoredCases.length > 0) {
             await batchCreateCaseFiles(scoredCases.map(c => {
                 const C = computeC(c.E, c.W, c.V, c.R);
-                const isQualified = cappedQualified.includes(c);
+                const isQualified = qualified.includes(c);
                 const stars = isQualified ? computeStars(C) : 0;
 
                 return {
@@ -243,10 +243,10 @@ export async function POST(request: NextRequest) {
                 mode,
                 qualified: cappedQualified.length,
                 dropped: dropped.length,
-                leads: cappedQualified.map(c => ({
+                leads: qualified.map(c => ({
                     company_name: c.company_name,
                     stars: computeStars(computeC(c.E, c.W, c.V, c.R)),
-                    why_now_text: whyNowTexts.get(c.org_number) || '',
+                    why_now_text: whyNowTexts.get(c.org_number) || c.gemini_reasoning || '',
                     suggested_role: mapTriggerToRole(c.seed.trigger_type || c.seed.trigger_detected || ''),
                 })),
                 duration: `${duration}ms`,
@@ -261,7 +261,7 @@ export async function POST(request: NextRequest) {
             qualified: cappedQualified.length,
             dropped: dropped.length,
             skipped: unprocessedSeeds.length - toScore.length,
-            leads: cappedQualified.map(c => {
+            leads: qualified.map(c => {
                 const C = computeC(c.E, c.W, c.V, c.R);
                 return {
                     company_name: c.company_name,
@@ -274,7 +274,7 @@ export async function POST(request: NextRequest) {
                     stars: computeStars(C),
                     trigger: c.seed.trigger_type || c.seed.trigger_detected,
                     suggested_role: mapTriggerToRole(c.seed.trigger_type || c.seed.trigger_detected || ''),
-                    why_now_text: whyNowTexts.get(c.org_number) || '',
+                    why_now_text: whyNowTexts.get(c.org_number) || c.gemini_reasoning || '',
                     reasoning: c.gemini_reasoning || '',
                 };
             }),
