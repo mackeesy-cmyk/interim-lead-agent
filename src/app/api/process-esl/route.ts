@@ -222,6 +222,7 @@ export async function POST(request: NextRequest) {
                     is_ostlandet: c.verification.is_ostlandet,
                     has_operations: c.verification.has_operations,
                     source_type: c.seed.source_type,
+                    case_summary: c.seed.excerpt || c.seed.raw_content?.slice(0, 500) || '',
                 };
             }));
             logger.info(`✅ batchCreateCaseFiles completed for ${scoredCases.length} records`, { mode, component: 'process-esl' });

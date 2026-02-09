@@ -14,15 +14,15 @@ export default async function Home() {
                 {/* Premium Header */}
                 <header className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-8">
                     <div className="space-y-2">
-                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider border border-blue-100 mb-2">
+                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-wider border border-blue-100 mb-2">
                             <span className="relative flex h-2 w-2">
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                                 <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
                             </span>
-                            Live Intelligence
+                            Live Overvåking
                         </div>
                         <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight">
-                            Intelligence <span className="text-blue-600">Dashboard</span>
+                            Intelligence <span className="text-blue-600">Dashbord</span>
                         </h1>
                         <p className="text-slate-500 text-lg max-w-2xl font-medium">
                             Kvalifiserte markedssignaler og interim-muligheter identifisert av AI.
@@ -32,14 +32,14 @@ export default async function Home() {
                     <div className="flex items-center gap-4 bg-white/50 backdrop-blur p-2 rounded-2xl border border-slate-200/60 shadow-sm">
                         <div className="px-4 py-2 text-center">
                             <div className="text-2xl font-black text-slate-900 leading-none">{qualifiedLeads.length}</div>
-                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-1">Leads</div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-1">Salgssignaler</div>
                         </div>
                         <div className="w-px h-8 bg-slate-200"></div>
                         <div className="px-4 py-2 text-center">
                             <div className="text-2xl font-black text-emerald-600 leading-none">
                                 {qualifiedLeads.filter(l => (l.stars || 0) >= 4).length}
                             </div>
-                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-1">High Priority</div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-1">Høy Prioritet</div>
                         </div>
                     </div>
                 </header>
@@ -110,36 +110,43 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
                             </svg>
                         ))}
                     </div>
-                    <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">AI Confidence</span>
+                    <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">AI-tillit</span>
                 </div>
             </div>
 
             {/* Score Grid: E, W, V, R */}
             <div className="grid grid-cols-4 gap-4 mb-8">
-                <ScoreMini label="Evidence" value={lead.E} color="blue" />
-                <ScoreMini label="Will/Need" value={lead.W} color="emerald" />
-                <ScoreMini label="Validation" value={lead.V === 1 ? 1 : 0} color="amber" />
-                <ScoreMini label="Risk" value={1 - (lead.R || 0)} color="rose" labelAlt="Safety" />
+                <ScoreMini label="Bevis" value={lead.E} color="blue" />
+                <ScoreMini label="Behov" value={lead.W} color="emerald" />
+                <ScoreMini label="Verifisert" value={lead.V === 1 ? 1 : 0} color="amber" />
+                <ScoreMini label="Risk" value={1 - (lead.R || 0)} color="rose" labelAlt="Trygghet" />
             </div>
 
             {/* AI Analysis Section */}
             <div className="flex-grow flex flex-col mb-8">
                 <div className="p-6 rounded-2xl bg-slate-50/50 border border-slate-100 group-hover:bg-white transition-colors duration-500 h-full relative">
                     <div className="flex items-center gap-2 mb-4">
-                        <div className="p-1 px-2 rounded-md bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest">AI Insights</div>
+                        <div className="p-1 px-2 rounded-md bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest">AI Innsikt</div>
                         <div className="h-px flex-grow bg-slate-200/60"></div>
                     </div>
 
                     <div className="space-y-4">
                         <div>
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Case Summary</span>
-                            <p className="text-slate-900 font-bold">
-                                {translateTrigger(lead.trigger_hypothesis || 'LeadershipChange')}
-                            </p>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Kasus</span>
+                            <div className="space-y-1">
+                                <p className="text-slate-900 font-bold leading-tight">
+                                    {translateTrigger(lead.trigger_hypothesis || 'LeadershipChange')}
+                                </p>
+                                {lead.case_summary && (
+                                    <p className="text-slate-500 text-sm font-medium leading-relaxed line-clamp-3">
+                                        {lead.case_summary}
+                                    </p>
+                                )}
+                            </div>
                         </div>
 
                         <div>
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Source</span>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Kilde</span>
                             <div className="flex items-center gap-2">
                                 <span className="text-slate-600 font-medium text-sm">
                                     {formatSourceType(lead.source_type)}
@@ -160,7 +167,7 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
                         </div>
 
                         <div>
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Why Now</span>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Hvorfor nå?</span>
                             <p className="text-slate-800 text-base leading-relaxed font-semibold italic">
                                 "{lead.why_now_text || 'Analyse under utførelse. Systemet venter på mer kontekst.'}"
                             </p>
@@ -194,11 +201,11 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
 
                 <div className="flex items-end justify-between pt-6 border-t border-slate-100">
                     <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">
-                        Ref: {lead.id?.slice(-8).toUpperCase()} • Identified {new Date(lead.created_at!).toLocaleDateString('nb-NO')}
+                        Ref: {lead.id?.slice(-8).toUpperCase()} • Identifisert {new Date(lead.created_at!).toLocaleDateString('nb-NO')}
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ESL+ Engine Active</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ESL+ Motor Aktiv</span>
                     </div>
                 </div>
             </div>
@@ -293,6 +300,7 @@ function formatSourceType(source: string | undefined): string {
         finansavisen_rss: 'Finansavisen',
         newsweb: 'NewsWeb (Oslo Børs)',
         brreg_update: 'Brønnøysundregistrene',
+        brreg_status_update: 'Brønnøysund Statusoppdatering',
         finn: 'FINN.no',
         linkedin_exec: 'LinkedIn (Move)',
         linkedin_signal: 'LinkedIn (Signal)',

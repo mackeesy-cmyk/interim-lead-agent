@@ -58,6 +58,7 @@ export interface CaseFile {
     stars?: number;
     C?: number;
     source_type?: string;
+    case_summary?: string;
 }
 
 export interface Evidence {
