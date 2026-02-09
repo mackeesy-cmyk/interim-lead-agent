@@ -8,12 +8,10 @@
 import * as cheerio from 'cheerio';
 
 // FINN search URLs: CxO roles filtered to Østlandet
+// Tightened queries - removed broad "interim" and less relevant CTO/COO
 export const FINN_SEARCH_URLS = [
     'https://www.finn.no/job/search?location=1.20001.20061&location=1.20001.20007&location=1.20001.20003&location=1.20001.20008&location=1.20001.20002&location=1.20001.20009&q=ceo',
     'https://www.finn.no/job/search?location=1.20001.20061&location=1.20001.20007&location=1.20001.20003&location=1.20001.20008&location=1.20001.20002&location=1.20001.20009&q=cfo',
-    'https://www.finn.no/job/search?location=1.20001.20061&location=1.20001.20007&location=1.20001.20003&location=1.20001.20008&location=1.20001.20002&location=1.20001.20009&q=cto',
-    'https://www.finn.no/job/search?location=1.20001.20061&location=1.20001.20007&location=1.20001.20003&location=1.20001.20008&location=1.20001.20002&location=1.20001.20009&q=coo',
-    'https://www.finn.no/job/search?location=1.20001.20061&location=1.20001.20007&location=1.20001.20003&location=1.20001.20008&location=1.20001.20002&location=1.20001.20009&q=interim',
     'https://www.finn.no/job/search?location=1.20001.20061&location=1.20001.20007&location=1.20001.20003&location=1.20001.20008&location=1.20001.20002&location=1.20001.20009&q=administrerende+direkt%C3%B8r',
 ];
 
@@ -85,13 +83,36 @@ export async function fetchFinnJobs(): Promise<FinnJobSeed[]> {
                 if (cardText.includes('management for hire')) urgencySignals.push('Interim');
 
                 if (title && company && url) {
-                    jobs.push({
-                        company_name: company,
-                        role: title,
-                        url,
-                        search_query: query,
-                        urgency_signals: [...new Set(urgencySignals)],
-                    });
+                    // Filter 1: Must have leadership keywords in title
+                    const titleLower = title.toLowerCase();
+                    const leadershipKeywords = [
+                        'ceo', 'cfo', 'cto', 'coo',
+                        'direktør', 'leder', 'sjef', 'chief', 'director',
+                        'interim', 'daglig leder', 'adm. dir', 'administrerende',
+                        'økonomidirektør', 'finansdirektør', 'it-direktør'
+                    ];
+                    const hasLeadershipRole = leadershipKeywords.some(kw => titleLower.includes(kw));
+
+                    // Filter 2: Exclude non-leadership roles
+                    const excludeKeywords = [
+                        'developer', 'utvikler', 'engineer', 'ingeniør',
+                        'analyst', 'analytiker', 'koordinator', 'coordinator',
+                        'assistant', 'assistent', 'konsulent', 'consultant',
+                        'adviser', 'rådgiver', 'specialist', 'spesialist',
+                        'tekniker', 'technician', 'designer'
+                    ];
+                    const isExcluded = excludeKeywords.some(kw => titleLower.includes(kw));
+
+                    // Only add if it's a leadership role and not excluded
+                    if (hasLeadershipRole && !isExcluded) {
+                        jobs.push({
+                            company_name: company,
+                            role: title,
+                            url,
+                            search_query: query,
+                            urgency_signals: [...new Set(urgencySignals)],
+                        });
+                    }
                 }
             });
 
