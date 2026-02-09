@@ -147,10 +147,13 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
                         <ActionButton icon="linkedin" label="Personer" href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(lead.company_name)}`} />
                     </div>
 
-                    <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
-                        <FeedbackBtn leadId={lead.id!} grade="A" current={lead.feedback_grade} color="emerald" />
-                        <FeedbackBtn leadId={lead.id!} grade="B" current={lead.feedback_grade} color="amber" />
-                        <FeedbackBtn leadId={lead.id!} grade="C" current={lead.feedback_grade} color="rose" />
+                    <div className="flex items-center gap-3 p-1.5 bg-slate-100/80 backdrop-blur-sm rounded-2xl border border-slate-200/50">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Relevanse</span>
+                        <div className="flex items-center gap-1">
+                            <FeedbackBtn leadId={lead.id!} grade="Relevant" current={lead.feedback_grade} color="emerald" />
+                            <FeedbackBtn leadId={lead.id!} grade="Delvis" current={lead.feedback_grade} color="amber" />
+                            <FeedbackBtn leadId={lead.id!} grade="Ikke" current={lead.feedback_grade} color="rose" />
+                        </div>
                     </div>
                 </div>
 
@@ -211,7 +214,7 @@ function ActionButton({ icon, label, href }: { icon: string; label: string; href
     );
 }
 
-function FeedbackBtn({ leadId, grade, current, color }: { leadId: string; grade: 'A' | 'B' | 'C'; current?: string; color: string }) {
+function FeedbackBtn({ leadId, grade, current, color }: { leadId: string; grade: 'Relevant' | 'Delvis' | 'Ikke'; current?: string; color: string }) {
     const active = current === grade;
     const colors: Record<string, string> = {
         emerald: active ? "bg-emerald-500 text-white" : "text-emerald-500 hover:bg-emerald-50",
@@ -222,9 +225,9 @@ function FeedbackBtn({ leadId, grade, current, color }: { leadId: string; grade:
     return (
         <form action={`/api/feedback?id=${leadId}&grade=${grade}`} method="POST">
             <button
-                className={`w-8 h-8 rounded-lg text-xs font-black transition-all ${colors[color]} ${active ? 'shadow-lg rotate-3' : 'scale-90 opacity-60'}`}
+                className={`px-3 h-8 rounded-lg text-[10px] font-black transition-all ${colors[color]} ${active ? 'shadow-md scale-105' : 'scale-95 opacity-70'}`}
             >
-                {grade}
+                {grade.toUpperCase()}
             </button>
         </form>
     );
