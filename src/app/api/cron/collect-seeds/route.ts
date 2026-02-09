@@ -4,7 +4,7 @@ import { searchBankruptcies, fetchKunngjoringer, fetchBrregUpdates, verifyCompan
 import { detectTriggers } from '@/lib/gemini';
 import { createSeed, checkDuplicate } from '@/lib/airtable';
 import { scrapeUrl, resetFirecrawlBudget, getFirecrawlStats } from '@/lib/firecrawl';
-import { fetchFinnJobs } from '@/lib/finn';
+// import { fetchFinnJobs } from '@/lib/finn'; // Disabled - see Stage 4 below
 import { requireAuth } from '@/lib/auth';
 
 // Use Node.js runtime for Airtable SDK compatibility
@@ -14,10 +14,11 @@ export const maxDuration = 300; // 5 minutes max
  * Seed Collection Cron Job
  * Collects potential leads from multiple sources:
  * 1. Brønnøysund bankruptcies (free API)
+ * 1.25. Brreg Update Monitor (status changes + role changes, free API)
  * 1.5. Brreg Kunngjøringer (scrape w2.brreg.no)
  * 2. RSS feeds (DN, E24, Finansavisen, NTB)
  * 3. Targeted scraping (NewsWeb, Finansavisen PR)
- * 4. FINN Jobb (CxO listings)
+ * 4. FINN Jobb (DISABLED - pending corroboration repurpose)
  */
 export async function GET(request: NextRequest) {
     const authError = requireAuth(request);
@@ -372,6 +373,12 @@ export async function GET(request: NextRequest) {
         }
 
         // 4. FINN Jobb (CxO listings on Østlandet)
+        // ⚠️ TEMPORARILY DISABLED (Feb 9 2026)
+        // Reason: FINN generates weak signals (E0: 0.3, W0: 0.3, R0: 0.5) with C=0.525 baseline
+        // Job postings are not crisis/interim signals - most qualify below threshold (C < 0.60)
+        // Plan: Repurpose FINN as corroboration source to validate leads from other sources
+        // To re-enable: uncomment this block and add back finn_seeds to totalSeeds calculation
+        /*
         if (!checkLimit()) {
             console.log('Fetching FINN job listings...');
             try {
@@ -409,9 +416,11 @@ export async function GET(request: NextRequest) {
                 results.errors.push(`FINN job scraping failed: ${error}`);
             }
         }
+        */
 
         const totalSeeds = results.bronnysund_seeds + results.brreg_updates_seeds
-            + results.brreg_kunngjoringer_seeds + results.rss_seeds + results.firecrawl_seeds + results.finn_seeds;
+            + results.brreg_kunngjoringer_seeds + results.rss_seeds + results.firecrawl_seeds;
+            // Note: finn_seeds excluded (FINN disabled as of Feb 9 2026)
         const duration = Date.now() - startTime;
         return NextResponse.json({
             success: true,
