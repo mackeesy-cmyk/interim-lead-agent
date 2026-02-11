@@ -6,15 +6,15 @@
         },
         {
             "path": "/api/cron/collect-seeds",
-            "schedule": "0 5 * * 1-5"
+            "schedule": "0 8 * * 1-5"
         },
         {
             "path": "/api/process-esl?mode=production",
-            "schedule": "0 6 * * 1-5"
+            "schedule": "30 8 * * 1-5"
         },
         {
             "path": "/api/cron/generate-report",
-            "schedule": "30 7 * * 1"
+            "schedule": "30 10 * * 1"
         }
     ]
 }

@@ -32,6 +32,7 @@ export async function fetchDNRSS(): Promise<RSSItem[]> {
 export async function fetchE24RSS(): Promise<RSSItem[]> {
     try {
         const feeds = [
+            'https://e24.no/rss2/',
             'https://e24.no/rss2/?seksjon=boers-og-finans',
             'https://e24.no/rss2/?seksjon=it'
         ];
@@ -79,6 +80,28 @@ export async function fetchNTBRSS(): Promise<RSSItem[]> {
         return parseRSSXML(xml);
     } catch (error) {
         console.error('Error fetching NTB RSS:', error);
+        return [];
+    }
+}
+
+export async function fetchRett24RSS(): Promise<RSSItem[]> {
+    try {
+        const response = await fetch('https://rett24.no/rss');
+        const xml = await response.text();
+        return parseRSSXML(xml);
+    } catch (error) {
+        console.error('Error fetching Rett24 RSS:', error);
+        return [];
+    }
+}
+
+export async function fetchDigiRSS(): Promise<RSSItem[]> {
+    try {
+        const response = await fetch('https://www.digi.no/rss');
+        const xml = await response.text();
+        return parseRSSXML(xml);
+    } catch (error) {
+        console.error('Error fetching Digi RSS:', error);
         return [];
     }
 }

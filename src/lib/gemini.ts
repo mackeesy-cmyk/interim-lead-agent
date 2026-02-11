@@ -332,6 +332,133 @@ Respond ONLY with valid JSON:
 }
 
 // ============================================
+// STRUCTURED NORWEGIAN ANALYSIS (Phase 6)
+// ============================================
+export interface StructuredAnalysis {
+    situasjonsanalyse: string;
+    strategisk_begrunnelse: string;
+    quality_score: number;
+    rejection_reason?: string;
+}
+
+export async function generateStructuredAnalysisBatch(
+    cases: ScoredCase[]
+): Promise<Map<string, StructuredAnalysis>> {
+    if (cases.length === 0) return new Map();
+
+    const caseSummaries = cases.map((c, i) => `
+Case ${i + 1} (${c.company_name}):
+- Org.nr: ${c.org_number}
+- Trigger: ${c.seed.trigger_type || c.seed.trigger_detected}
+- Employees: ${c.brreg_data?.antallAnsatte || 'Unknown'}
+- Location: ${c.brreg_data?.forretningsadresse?.kommune || 'Unknown'}
+- Industry: ${c.brreg_data?.naeringskode1?.beskrivelse || 'Unknown'}
+- Content: ${truncate(c.seed.raw_content || c.seed.excerpt, 600)}
+- Current E=${c.E.toFixed(2)}, W=${c.W.toFixed(2)}, V=${c.V}, R=${c.R.toFixed(2)}
+`).join('\n---\n');
+
+    const prompt = `
+Du er en ekspert på norsk interim ledelse og bedriftskriser.
+
+VIKTIG KONTEKST OM INTERIM LEDELSE:
+- Interim ledelse er KORTSIKTIGE topplederstillinger (typisk 3-12 måneder)
+- Typiske situasjoner: Plutselig lederavgang, konkurs/rekonstruksjon, fusjon/oppkjøp, akutt krisehåndtering
+- IKKE relevant: Normale rekrutteringsprosesser, generell "omstrukturering" uten konkret krise, små selskaper (<30 ansatte)
+
+DINE OPPGAVER:
+For hvert selskap nedenfor, generer:
+
+1. SITUASJONSANALYSE (3-4 setninger på norsk):
+   - Hva skjer i selskapet akkurat nå?
+   - Hva er den konkrete hendelsen/krisen?
+   - Hvilket marked/bransje opererer de i?
+   - Hvorfor haster det?
+
+2. STRATEGISK BEGRUNNELSE (2-3 setninger på norsk):
+   - Hvorfor trengs interim ledelse SPESIFIKT (ikke fast ansettelse)?
+   - Hvilken rolle (daglig leder, CFO, driftsdirektør, transformasjonsleder)?
+   - Hvilken verdi tilfører en interim-leder i DENNE situasjonen?
+   - Hva er forventet resultat/leveranse?
+
+3. KVALITETSSCORE (0-100):
+   - 85-100: Svært klar interim-mulighet (konkurs med drift, akutt CEO-avgang, børskrise)
+   - 70-84: Klar interim-mulighet (fusjon/oppkjøp, strategisk krise, lederskifte)
+   - 60-69: Sannsynlig mulighet (omstrukturering med konkret plan, transformasjon)
+   - 40-59: Usikker (vage signaler, generell omstrukturering, uklar krise)
+   - 0-39: Ikke relevant (normal rekruttering, liten bedrift, ingen krise)
+
+KVALITETSKRITERIER FOR HØY SCORE:
+✅ Konkret krise eller akutt situasjon
+✅ Tydelig ledergap eller midlertidig behov
+✅ 30+ ansatte (skalerer for interim C-level)
+✅ Østlandet (geografisk marked)
+✅ Tidspress eller hastverk
+✅ Bekreftede fakta (ikke rykter)
+
+AUTOMATISK LAV SCORE FOR:
+❌ "Selskapet reorganiserer avdelinger" → Normal drift
+❌ "Ny strategi lanseres" → Normal utvikling
+❌ "Ansetter ny markedsdirektør" → Vanlig rekruttering
+❌ "Liten bedrift med 10 ansatte" → For lite selskap
+❌ "Mulig fusjon diskuteres" → For vagt/usikkert
+
+CASES TIL ANALYSE:
+${caseSummaries}
+
+Svar BARE med valid JSON:
+{
+  "analyses": [
+    {
+      "org_number": "9-siffer",
+      "company_name": "...",
+      "situasjonsanalyse": "3-4 setninger på norsk om situasjonen...",
+      "strategisk_begrunnelse": "2-3 setninger på norsk om interim-behov...",
+      "quality_score": 75,
+      "rejection_reason": "Kun hvis score < 60: kort forklaring"
+    }
+  ]
+}
+`;
+
+    try {
+        const result = await model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+                temperature: 0.2,  // Low for consistency
+                maxOutputTokens: 8192,
+                responseMimeType: 'application/json',
+            },
+        });
+
+        const responseText = result.response.text();
+        const jsonStr = cleanJson(responseText);
+        const parsed = JSON.parse(jsonStr);
+
+        const results = new Map<string, StructuredAnalysis>();
+        cases.forEach((c) => {
+            const orgNr = c.org_number.replace(/\s/g, '');
+            const match = parsed.analyses?.find((a: any) =>
+                (a.org_number && a.org_number.replace(/\s/g, '') === orgNr) ||
+                (a.company_name && a.company_name === c.company_name)
+            );
+            if (match) {
+                results.set(c.org_number, {
+                    situasjonsanalyse: match.situasjonsanalyse || '',
+                    strategisk_begrunnelse: match.strategisk_begrunnelse || '',
+                    quality_score: match.quality_score || 0,
+                    rejection_reason: match.rejection_reason,
+                });
+            }
+        });
+
+        return results;
+    } catch (error) {
+        console.error('Gemini structured analysis failed:', error);
+        return new Map();
+    }
+}
+
+// ============================================
 // PARSERS
 // ============================================
 export async function parseFinnResults(markdown: string, searchQuery: string): Promise<FinnParsedJob[]> {

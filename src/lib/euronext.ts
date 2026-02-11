@@ -14,6 +14,7 @@ export interface EuronextAnnouncement {
     industry: string;
     topic: string;
     node_id: string; // Euronext internal ID
+    url: string; // Full announcement URL
 }
 
 /**
@@ -48,13 +49,14 @@ export async function fetchEuronextAnnouncements(): Promise<EuronextAnnouncement
             const industry = $row.find('td.views-field-field-icb').text().trim();
             const topic = $row.find('td.views-field-field-company-press-releases').text().trim();
 
-            if (company && title) {
+            if (company && title && nodeId) {
                 announcements.push({
                     company_name: company,
                     title,
                     industry,
                     topic,
                     node_id: nodeId,
+                    url: `https://live.euronext.com/en/node/${nodeId}`,
                 });
             }
         });

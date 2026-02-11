@@ -60,6 +60,12 @@ export interface CaseFile {
     C?: number;
     source_type?: string;
     case_summary?: string;
+
+    // NEW: Structured Norwegian analysis fields (Phase 6)
+    situasjonsanalyse?: string;
+    strategisk_begrunnelse?: string;
+    quality_score?: number;
+    rejection_reason?: string;
 }
 
 export interface Evidence {

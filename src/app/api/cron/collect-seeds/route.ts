@@ -285,7 +285,25 @@ export async function GET(request: NextRequest) {
                 console.warn('NTB RSS failed');
             }
 
-            const rssItems = [...dnItems, ...e24Items, ...finansavisenItems, ...ntbItems];
+            let rett24Items: any[] = [];
+            try {
+                const { fetchRett24RSS } = await import('@/lib/rss');
+                rett24Items = await fetchRett24RSS();
+                console.log(`📰 Fetched ${rett24Items.length} from Rett24 feed`);
+            } catch (e) {
+                console.warn('Rett24 RSS failed');
+            }
+
+            let digiItems: any[] = [];
+            try {
+                const { fetchDigiRSS } = await import('@/lib/rss');
+                digiItems = await fetchDigiRSS();
+                console.log(`📰 Fetched ${digiItems.length} from Digi feed`);
+            } catch (e) {
+                console.warn('Digi RSS failed');
+            }
+
+            const rssItems = [...dnItems, ...e24Items, ...finansavisenItems, ...ntbItems, ...rett24Items, ...digiItems];
             // Filter down to reduce potential waste before Gemini
             const filteredItems = preFilterItems(rssItems).slice(0, Math.max(0, limit - opsCount));
 
@@ -381,58 +399,62 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // 3a. Euronext Oslo Børs announcements (FREE — Cheerio, replaces NewsWeb Firecrawl scrape)
+        // 3a. NewsWeb/Euronext 2-Stage Intelligent Scraper
+        // Stage 1: Scrape listing (1 credit) → analyze → Stage 2: Deep scrape interesting (5-10 credits)
         if (!checkLimit()) {
-            console.log('Fetching Euronext Oslo Børs announcements (Cheerio)...');
             try {
-                const announcements = await fetchEuronextAnnouncements();
+                const { scrapeNewsWebListing, deepScrapeNewsWebAnnouncements } = await import('@/lib/newsweb');
 
-                // Build content for Gemini trigger detection from all announcements
-                const announcementText = announcements
-                    .map(a => `${a.company_name}: ${a.title} [${a.industry}] (${a.topic})`)
-                    .join('\n');
+                // Stage 1: Get all announcements + identify interesting ones
+                const newsWebResult = await scrapeNewsWebListing();
+                opsCount += newsWebResult.creditsUsed; // 1 Firecrawl credit
+                opsCount++; // Gemini trigger detection
 
-                if (announcementText.length > 0) {
-                    opsCount++; // Gemini call
-                    const triggerResult = await detectTriggers(
-                        announcementText,
-                        'stock_exchange_announcement',
-                        'Euronext Oslo Børs'
-                    );
+                if (newsWebResult.interesting.length > 0) {
+                    console.log(`📰 NewsWeb: ${newsWebResult.interesting.length} interesting announcements found`);
 
-                    if (!triggerResult.no_trigger_found && triggerResult.triggers_found.length > 0) {
-                        const companyName = triggerResult.company_mentioned.name;
-                        if (companyName && companyName !== 'Unknown') {
-                            const isDuplicate = await checkDuplicate(triggerResult.company_mentioned.org_number || companyName);
-                            if (isDuplicate) {
-                                results.duplicates_skipped++;
-                            } else {
-                                const validTriggers = [
-                                    'LeadershipChange', 'Restructuring', 'MergersAcquisitions', 'StrategicReview',
-                                    'OperationalCrisis', 'RegulatoryLegal', 'CostProgram', 'HiringSignal',
-                                    'OwnershipGovernance', 'TransformationProgram'
-                                ];
-                                const detectedTrigger = triggerResult.triggers_found[0]?.category || 'LeadershipChange';
-                                const finalTrigger = validTriggers.includes(detectedTrigger) ? detectedTrigger : 'LeadershipChange';
+                    // Stage 2: Deep scrape only interesting announcements
+                    const fullContent = await deepScrapeNewsWebAnnouncements(newsWebResult.interesting);
+                    opsCount += newsWebResult.interesting.length; // Firecrawl credits for deep scrape
 
-                                await createSeed({
-                                    company_name: companyName,
-                                    org_number: triggerResult.company_mentioned.org_number || '',
-                                    source_type: 'newsweb',
-                                    source_url: 'https://live.euronext.com/en/markets/oslo/equities/company-news',
-                                    trigger_detected: finalTrigger,
-                                    excerpt: (triggerResult.triggers_found[0]?.excerpt || '').slice(0, 500),
-                                    raw_content: announcementText.slice(0, 2000),
-                                    collected_at: new Date().toISOString(),
-                                    processed: false
-                                });
-                                results.firecrawl_seeds++; // Reusing counter name
-                            }
+                    // Create seeds for each interesting announcement with full content
+                    for (const announcement of newsWebResult.interesting) {
+                        const isDuplicate = await checkDuplicate(announcement.company_name);
+                        if (isDuplicate) {
+                            results.duplicates_skipped++;
+                            continue;
                         }
+
+                        const validTriggers = [
+                            'LeadershipChange', 'Restructuring', 'MergersAcquisitions', 'StrategicReview',
+                            'OperationalCrisis', 'RegulatoryLegal', 'CostProgram', 'HiringSignal',
+                            'OwnershipGovernance', 'TransformationProgram'
+                        ];
+                        const detectedTrigger = announcement.triggers?.[0] || 'LeadershipChange';
+                        const finalTrigger = validTriggers.includes(detectedTrigger) ? detectedTrigger : 'LeadershipChange';
+
+                        const content = fullContent.get(announcement.company_name) || announcement.title;
+
+                        await createSeed({
+                            company_name: announcement.company_name,
+                            org_number: '', // Will be looked up later
+                            source_type: 'newsweb',
+                            source_url: announcement.url,
+                            trigger_detected: finalTrigger,
+                            excerpt: announcement.title.slice(0, 500),
+                            raw_content: content,
+                            collected_at: new Date().toISOString(),
+                            processed: false
+                        });
+                        results.firecrawl_seeds++;
                     }
+
+                    console.log(`✅ NewsWeb: Created ${newsWebResult.interesting.length} seeds with full content`);
+                } else {
+                    console.log('📰 NewsWeb: No interesting announcements found');
                 }
             } catch (error) {
-                results.errors.push(`Euronext scrape error: ${error}`);
+                results.errors.push(`NewsWeb scrape error: ${error}`);
             }
         }
 

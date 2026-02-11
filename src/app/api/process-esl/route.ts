@@ -8,7 +8,7 @@ import {
     checkDuplicate,
 } from '@/lib/airtable';
 import { CachedBrregLookup, getBrregConfirmation } from '@/lib/bronnysund';
-import { batchProcessSeeds, generateWhyNowBatch, generateSummaryBatch } from '@/lib/gemini';
+import { batchProcessSeeds, generateWhyNowBatch, generateSummaryBatch, generateStructuredAnalysisBatch } from '@/lib/gemini';
 import { searchCorroboration } from '@/lib/search';
 import { scrapeUrl, resetFirecrawlBudget, getFirecrawlStats } from '@/lib/firecrawl';
 import { getScoringWeights } from '@/config/scoring-config';
@@ -102,6 +102,44 @@ export async function POST(request: NextRequest) {
 
             if (mode === 'test') {
                 logger.audit(`Verification for ${group.canonical_name}: ${JSON.stringify(verification)}`, { mode, component: 'process-esl' });
+            }
+
+            // UNIVERSAL EMPLOYEE FILTER: Enforce 30+ employees for ALL sources (Phase 6)
+            const employees = company?.antallAnsatte ?? 0;
+            const employeeCheckFailed = employees > 0 && employees < 30;
+
+            if (employeeCheckFailed) {
+                if (mode === 'test') {
+                    logger.audit(
+                        `Employee filter: ${group.canonical_name} rejected (${employees} employees, need 30+)`,
+                        { mode, component: 'process-esl' }
+                    );
+                }
+                // Return with hard_stop veto
+                const effectiveSeed = { ...seed };
+                if (group.source_count > 1) {
+                    effectiveSeed.raw_content = group.merged_raw_content;
+                }
+
+                return {
+                    seed: effectiveSeed,
+                    company_name: group.canonical_name || company?.navn || 'Unknown',
+                    org_number: group.canonical_org_number || company?.organisasjonsnummer || '',
+                    E: Math.min(1.0, scores.E0 + group.corroboration_boost),
+                    W: Math.min(1.0, scores.W0 + group.corroboration_boost),
+                    V: verification.V,
+                    R: scores.R0,
+                    brreg_data: company,
+                    verification: {
+                        ...verification,
+                        hard_stop: true,
+                        reasoning: `Too few employees: ${employees} (min 30)`
+                    },
+                    is_duplicate: false,
+                    status: 'processing' as const,
+                    source_count: group.source_count,
+                    merged_triggers: group.merged_triggers,
+                };
             }
 
             // Use resolved org number (from seed or name search)
@@ -265,22 +303,43 @@ export async function POST(request: NextRequest) {
             apiCallsUsed.firecrawl = stats.credits_used;
         }
 
-        // 7. BATCH generer Why Now og Oppsummering for ALLE kvalifiserte i denne batchen
+        // 7. BATCH generer Why Now, Oppsummering og Strukturert Analyse for ALLE kvalifiserte i denne batchen
         let whyNowTexts: Map<string, string> = new Map();
         let summaries: Map<string, string> = new Map();
+        let structuredAnalysis: Map<string, any> = new Map();
+
         if (qualified.length > 0) {
-            [whyNowTexts, summaries] = await Promise.all([
+            [whyNowTexts, summaries, structuredAnalysis] = await Promise.all([
                 generateWhyNowBatch(qualified),
-                generateSummaryBatch(qualified)
+                generateSummaryBatch(qualified),
+                generateStructuredAnalysisBatch(qualified)
             ]);
-            apiCallsUsed.gemini += 2;
+            apiCallsUsed.gemini += 3;
         }
+
+        // 7b. Quality filter: Only keep leads with quality_score >= 60 (Phase 6)
+        const highQualityLeads = qualified.filter(c => {
+            const analysis = structuredAnalysis.get(c.org_number);
+            if (!analysis) return false;
+
+            const isHighQuality = analysis.quality_score >= 60;
+            if (!isHighQuality && mode === 'test') {
+                logger.audit(
+                    `Rejected by quality filter: ${c.company_name} (score: ${analysis.quality_score}, reason: ${analysis.rejection_reason})`,
+                    { mode, component: 'process-esl' }
+                );
+            }
+            return isHighQuality;
+        });
+
+        const qualityRejected = qualified.filter(c => !highQualityLeads.includes(c));
 
         // 8. Update Airtable in batches
         if (scoredCases.length > 0) {
             await batchCreateCaseFiles(scoredCases.map(c => {
                 const C = computeC(c.E, c.W, c.V, c.R);
-                const isQualified = qualified.includes(c);
+                const isQualified = highQualityLeads.includes(c);  // Phase 6: Use quality-filtered leads
+                const analysis = structuredAnalysis.get(c.org_number);
                 const stars = isQualified ? computeStars(C) : 0;
 
                 return {
@@ -292,7 +351,7 @@ export async function POST(request: NextRequest) {
                     V: c.V,
                     R: Math.round(c.R * 100) / 100,
                     status: isQualified ? 'qualified' : 'dropped',
-                    why_now_text: whyNowTexts.get(c.org_number) || c.gemini_reasoning || '',
+                    why_now_text: analysis?.strategisk_begrunnelse || whyNowTexts.get(c.org_number) || c.gemini_reasoning || '',
                     qualified_at: isQualified ? new Date().toISOString() : undefined,
                     created_at: new Date().toISOString(),
                     suggested_role: mapTriggerToRole(c.seed.trigger_type || c.seed.trigger_detected || ''),
@@ -300,8 +359,15 @@ export async function POST(request: NextRequest) {
                     is_ostlandet: c.verification.is_ostlandet,
                     has_operations: c.verification.has_operations,
                     source_type: c.seed.source_type,
-                    source_url: c.seed.source_url || '',
+                    // TODO: Uncomment after adding source_url field to Airtable CaseFiles (see AIRTABLE_SETUP.md)
+                    // source_url: c.seed.source_url || '',
                     case_summary: summaries.get(c.org_number) || c.seed.excerpt || c.seed.raw_content?.slice(0, 500) || '',
+
+                    // Phase 6: Structured Norwegian analysis fields
+                    situasjonsanalyse: analysis?.situasjonsanalyse,
+                    strategisk_begrunnelse: analysis?.strategisk_begrunnelse,
+                    quality_score: analysis?.quality_score,
+                    rejection_reason: !isQualified ? analysis?.rejection_reason : undefined,
                 };
             }));
             logger.info(`✅ batchCreateCaseFiles completed for ${scoredCases.length} records`, { mode, component: 'process-esl' });
@@ -322,8 +388,8 @@ export async function POST(request: NextRequest) {
                 success: true,
                 mode,
                 qualified: cappedQualified.length,
-                dropped: dropped.length,
-                leads: qualified.map(c => ({
+                dropped: dropped.length + qualityRejected.length,
+                leads: highQualityLeads.map(c => ({
                     company_name: c.company_name,
                     stars: computeStars(computeC(c.E, c.W, c.V, c.R)),
                     why_now_text: whyNowTexts.get(c.org_number) || c.gemini_reasoning || '',
@@ -339,9 +405,9 @@ export async function POST(request: NextRequest) {
             mode,
             processed: unprocessedSeeds.length,
             qualified: cappedQualified.length,
-            dropped: dropped.length,
+            dropped: dropped.length + qualityRejected.length,
             skipped: unprocessedSeeds.length - toScore.length,
-            leads: qualified.map(c => {
+            leads: highQualityLeads.map(c => {
                 const C = computeC(c.E, c.W, c.V, c.R);
                 return {
                     company_name: c.company_name,

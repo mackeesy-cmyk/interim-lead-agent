@@ -4,8 +4,12 @@ export const dynamic = 'force-dynamic';
 
 export default async function Home() {
     const leads = await getCaseFiles();
+
+    // Phase 6: Filter for high-quality leads only (2+ stars AND quality_score >= 60)
     const qualifiedLeads = leads
         .filter(l => l.status === 'qualified')
+        .filter(l => (l.quality_score || 0) >= 60)  // AI quality threshold
+        .filter(l => (l.stars || 0) >= 2)           // Minimum 2 stars
         .sort((a, b) => (b.stars || 0) - (a.stars || 0));
 
     return (
@@ -158,12 +162,13 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
                 </div>
             </div>
 
-            {/* Score Grid: E, W, V, R */}
-            <div className="grid grid-cols-4 gap-8 mb-10 border-t border-b border-slate-50 py-6">
+            {/* Score Grid: E, W, V, R, AI-Score (Phase 6) */}
+            <div className="grid grid-cols-5 gap-8 mb-10 border-t border-b border-slate-50 py-6">
                 <ScoreMini label="Bevis" value={lead.E} color="indigo" />
                 <ScoreMini label="Behov" value={lead.W} color="indigo" />
                 <ScoreMini label="Verifisert" value={lead.V === 1 ? 1 : 0} color="indigo" />
                 <ScoreMini label="Kvalitet" value={1 - (lead.R || 0)} color="indigo" />
+                <ScoreMini label="AI-Score" value={(lead.quality_score || 0) / 100} color="indigo" />
             </div>
 
             {/* AI Analysis Section */}
@@ -178,7 +183,13 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
                             <h3 className="text-lg font-bold text-slate-900 uppercase tracking-tight">
                                 {translateTrigger(lead.trigger_hypothesis || 'LeadershipChange')}
                             </h3>
-                            {lead.case_summary && (
+                            {/* Phase 6: Use structured situasjonsanalyse field */}
+                            {lead.situasjonsanalyse && (
+                                <p className="text-slate-700 text-base font-normal leading-relaxed">
+                                    {lead.situasjonsanalyse}
+                                </p>
+                            )}
+                            {!lead.situasjonsanalyse && lead.case_summary && (
                                 <p className="text-slate-500 text-base font-normal leading-relaxed">
                                     {lead.case_summary}
                                 </p>
@@ -226,7 +237,7 @@ function LeadCard({ lead, index }: { lead: CaseFile; index: number }) {
 
                         <blockquote className="border-l-2 border-indigo-600 pl-4 py-1">
                             <p className="text-slate-800 text-lg leading-relaxed font-light italic">
-                                "{lead.why_now_text || 'Analyse under utførelse. Systemet venter på mer kontekst.'}"
+                                "{lead.strategisk_begrunnelse || lead.why_now_text || 'Analyse under utførelse. Systemet venter på mer kontekst.'}"
                             </p>
                         </blockquote>
                     </div>
