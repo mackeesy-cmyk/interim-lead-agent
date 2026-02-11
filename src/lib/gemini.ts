@@ -20,6 +20,8 @@ export interface SeedData {
     V: number;
     R: number;
     brreg_data?: any;
+    source_count?: number;
+    merged_triggers?: string[];
 }
 
 export interface ScoredCase extends SeedData {
@@ -136,20 +138,38 @@ Case ${i + 1}:
 - Company: ${c.company_name}
 - Org.nr: ${c.org_number}
 - Source: ${c.seed.source_type}
-- Trigger: ${c.seed.trigger_type || 'unknown'}
-- Content: ${truncate(c.seed.raw_content || c.seed.excerpt, 300)}
+- Sources corroborating: ${c.source_count || 1}
+- Trigger(s): ${c.merged_triggers?.join(', ') || c.seed.trigger_type || c.seed.trigger_detected || 'unknown'}
+- Content: ${truncate(c.seed.raw_content || c.seed.excerpt, 600)}
 - Brønnøysund verified: ${c.V === 1 ? 'Yes' : 'No'}
 - Industry: ${c.brreg_data?.naeringskode1?.beskrivelse || 'Unknown'}
 - Employees: ${c.brreg_data?.antallAnsatte || 'Unknown'}
+- Company type: ${c.brreg_data?.organisasjonsform?.beskrivelse || 'Unknown'}
+- Location: ${c.brreg_data?.forretningsadresse?.kommune || 'Unknown'}
 `).join('\n---\n');
 
     return `
 You are an expert B2B lead qualification system for a Norwegian interim management firm.
+The firm provides temporary C-level executives (daglig leder, CFO, COO, transformation lead)
+to companies experiencing crises, leadership gaps, or major transitions.
 
 Score each case on three dimensions (0.0 to 1.0):
-- E (Evidence strength): How reliable is the signal?
-- W (Will/Need): How likely does this company need services right now?
-- R (Risk): Risk of false positive or bad timing.
+- E (Evidence strength): How reliable and specific is the signal?
+  Multiple independent sources = higher E. Official registry data = higher E.
+  Vague news mention = lower E.
+- W (Will/Need): How likely does this company need interim leadership RIGHT NOW?
+  Active crisis + leadership gap = high W. Routine change = low W.
+  Consider: Is this a situation where an external interim leader adds value?
+- R (Risk): Risk of false positive, bad timing, or unsuitable lead.
+  Company already fully in liquidation = higher R (too late).
+  Multiple sources confirming = lower R.
+
+KEY ASSESSMENT CRITERIA:
+- A bankruptcy/restructuring with 30+ employees and no CEO = HIGH W (urgent interim need)
+- A role change where a new CEO is already appointed = LOW W (gap already filled)
+- A restructuring with ongoing operations = HIGH W (needs operational leadership)
+- Multiple independent sources confirming same crisis = HIGH E, LOW R
+- Pure job postings without crisis context = LOW W
 
 TRIGGER ONTOLOGY:
 1. Leadership changes
@@ -169,7 +189,7 @@ ${caseSummaries}
 Respond ONLY with valid JSON:
 {
   "cases": [
-    { "org_number": "9-digits", "company_name": "...", "E": 0.75, "W": 0.60, "R": 0.20, "reasoning": "Brief explanation" },
+    { "org_number": "9-digits", "company_name": "...", "E": 0.75, "W": 0.60, "R": 0.20, "reasoning": "Brief explanation of interim leadership fit" },
     ...
   ]
 }

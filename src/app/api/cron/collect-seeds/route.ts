@@ -1,11 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchDNRSS, preFilterItems } from '@/lib/rss';
-import { searchBankruptcies, fetchKunngjoringer, fetchBrregUpdates, verifyCompany, enrichBrregSeed, CachedBrregLookup } from '@/lib/bronnysund';
+import { searchBankruptcies, fetchKunngjoringer, fetchBrregUpdates, verifyCompany, enrichBrregSeed, CachedBrregLookup, isViableBrregLead } from '@/lib/bronnysund';
 import { detectTriggers } from '@/lib/gemini';
 import { createSeed, checkDuplicate } from '@/lib/airtable';
 import { scrapeUrl, resetFirecrawlBudget, getFirecrawlStats } from '@/lib/firecrawl';
+import { searchNewsContext } from '@/lib/search';
+import { fetchEuronextAnnouncements } from '@/lib/euronext';
 // import { fetchFinnJobs } from '@/lib/finn'; // Disabled - see Stage 4 below
 import { requireAuth } from '@/lib/auth';
+
+// Max Firecrawl credits to spend on news enrichment for Brreg seeds
+const MAX_NEWS_ENRICHMENT_SEARCHES = 10;
+
+// Buffered Brreg seed before writing to Airtable
+interface BufferedSeed {
+    data: any; // Seed data for createSeed()
+    employees: number; // For sorting (enrich largest companies first)
+    resultKey: 'bronnysund_seeds' | 'brreg_updates_seeds' | 'brreg_kunngjoringer_seeds';
+}
 
 // Use Node.js runtime for Airtable SDK compatibility
 export const maxDuration = 300; // 5 minutes max
@@ -52,10 +64,12 @@ export async function GET(request: NextRequest) {
     };
 
     try {
-        // 1. Fetch bankruptcies from Brønnøysund (Low cost, high value)
-        // Only counting DB writes as operations here if we want to be strict, 
-        // but user likely means external API calls (Gemini/Firecrawl).
-        // Let's count Brønnøysund lookups as 0 for now as they are free/cheap.
+        // ============================================
+        // BRREG STAGES: Buffer seeds, then enrich with news before writing
+        // ============================================
+        const brregSeedBuffer: BufferedSeed[] = [];
+
+        // 1. Fetch bankruptcies from Brønnøysund (free API)
         console.log('Fetching bankruptcies from Brønnøysund...');
         const bankruptcies = await searchBankruptcies(30);
 
@@ -64,35 +78,40 @@ export async function GET(request: NextRequest) {
                 const verification = verifyCompany(company);
                 if (!verification.is_ostlandet) continue;
 
+                const viability = isViableBrregLead(company);
+                if (!viability.viable) continue;
+
                 const isDuplicate = await checkDuplicate(company.organisasjonsnummer);
                 if (isDuplicate) {
                     results.duplicates_skipped++;
                     continue;
                 }
 
-                await createSeed({
-                    company_name: company.navn,
-                    org_number: company.organisasjonsnummer,
-                    source_type: 'bronnysund',
-                    source_url: `https://data.brreg.no/enhetsregisteret/oppslag/enheter/${company.organisasjonsnummer}`,
-                    trigger_detected: 'Restructuring',
-                    excerpt: `Konkurs meldt ${company.konkursdato || 'nylig'}. ${company.antallAnsatte || 0} ansatte.`,
-                    collected_at: new Date().toISOString(),
-                    processed: false
+                brregSeedBuffer.push({
+                    data: {
+                        company_name: company.navn,
+                        org_number: company.organisasjonsnummer,
+                        source_type: 'bronnysund',
+                        source_url: `https://data.brreg.no/enhetsregisteret/oppslag/enheter/${company.organisasjonsnummer}`,
+                        trigger_detected: 'Restructuring',
+                        excerpt: `Konkurs meldt ${company.konkursdato || 'nylig'}. ${company.antallAnsatte || 0} ansatte.`,
+                        collected_at: new Date().toISOString(),
+                        processed: false
+                    },
+                    employees: company.antallAnsatte || 0,
+                    resultKey: 'bronnysund_seeds',
                 });
-                results.bronnysund_seeds++;
             } catch (error) {
                 results.errors.push(`Brønnøysund seed error: ${error}`);
             }
         }
 
-        // 1.25. Brreg Update Monitor (company status changes + role changes — FREE API)
+        // 1.25. Brreg Update Monitor (status changes + role changes — free API)
         if (!checkLimit()) {
             console.log('Fetching Brreg update monitor...');
             try {
                 const updates = await fetchBrregUpdates(2);
 
-                // Batch lookup company data for enrichment
                 const brregLookup = new CachedBrregLookup();
                 const orgNumbers = updates.map(u => u.org_number).filter(Boolean);
                 const companyDataMap = orgNumbers.length > 0
@@ -111,7 +130,6 @@ export async function GET(request: NextRequest) {
                             ? 'brreg_role_change'
                             : 'brreg_status_update';
 
-                        // Enrich the seed with detailed context
                         const companyData = companyDataMap.get(update.org_number) || null;
                         const enrichedContent = enrichBrregSeed(
                             {
@@ -122,18 +140,21 @@ export async function GET(request: NextRequest) {
                             companyData
                         );
 
-                        await createSeed({
-                            company_name: update.company_name,
-                            org_number: update.org_number,
-                            source_type: sourceType,
-                            source_url: update.source_url,
-                            trigger_detected: update.trigger_category,
-                            excerpt: update.excerpt.slice(0, 500),
-                            raw_content: enrichedContent,
-                            collected_at: new Date().toISOString(),
-                            processed: false,
+                        brregSeedBuffer.push({
+                            data: {
+                                company_name: update.company_name,
+                                org_number: update.org_number,
+                                source_type: sourceType,
+                                source_url: update.source_url,
+                                trigger_detected: update.trigger_category,
+                                excerpt: update.excerpt.slice(0, 500),
+                                raw_content: enrichedContent,
+                                collected_at: new Date().toISOString(),
+                                processed: false,
+                            },
+                            employees: companyData?.antallAnsatte || 0,
+                            resultKey: 'brreg_updates_seeds',
                         });
-                        results.brreg_updates_seeds++;
                     } catch (error) {
                         results.errors.push(`Brreg update seed error: ${error}`);
                     }
@@ -150,25 +171,40 @@ export async function GET(request: NextRequest) {
                 opsCount += 2; // 1 Firecrawl scrape + 1 Gemini parse
                 const kunngjoringer = await fetchKunngjoringer(7);
 
+                const kBrregLookup = new CachedBrregLookup();
+                const kOrgNumbers = kunngjoringer.map(k => k.org_number).filter(Boolean);
+                const kCompanyData = kOrgNumbers.length > 0
+                    ? await kBrregLookup.batchLookup(kOrgNumbers)
+                    : new Map();
+
                 for (const k of kunngjoringer) {
                     try {
+                        if (k.org_number) {
+                            const kCompany = kCompanyData.get(k.org_number) || null;
+                            const viability = isViableBrregLead(kCompany);
+                            if (!viability.viable) continue;
+                        }
+
                         const isDuplicate = await checkDuplicate(k.org_number || k.company_name);
                         if (isDuplicate) {
                             results.duplicates_skipped++;
                             continue;
                         }
 
-                        await createSeed({
-                            company_name: k.company_name,
-                            org_number: k.org_number || '',
-                            source_type: 'brreg_kunngjoringer',
-                            source_url: 'https://w2.brreg.no/kunngjoring/kombisok.jsp',
-                            trigger_detected: k.trigger_category,
-                            excerpt: `${k.announcement_type}: ${k.excerpt}`.slice(0, 500),
-                            collected_at: new Date().toISOString(),
-                            processed: false
+                        brregSeedBuffer.push({
+                            data: {
+                                company_name: k.company_name,
+                                org_number: k.org_number || '',
+                                source_type: 'brreg_kunngjoringer',
+                                source_url: 'https://w2.brreg.no/kunngjoring/kombisok.jsp',
+                                trigger_detected: k.trigger_category,
+                                excerpt: `${k.announcement_type}: ${k.excerpt}`.slice(0, 500),
+                                collected_at: new Date().toISOString(),
+                                processed: false
+                            },
+                            employees: kCompanyData.get(k.org_number)?.antallAnsatte || 0,
+                            resultKey: 'brreg_kunngjoringer_seeds',
                         });
-                        results.brreg_kunngjoringer_seeds++;
                     } catch (error) {
                         results.errors.push(`Brreg kunngjøring seed error: ${error}`);
                     }
@@ -177,6 +213,42 @@ export async function GET(request: NextRequest) {
                 results.errors.push(`Brreg kunngjøringer failed: ${error}`);
             }
         }
+
+        // 1.75. NEWS ENRICHMENT: Search for news about top Brreg leads (by employee count)
+        // Budget: max 10 Firecrawl searches (1 credit each, metadata only)
+        if (brregSeedBuffer.length > 0) {
+            // Sort by employee count DESC — enrich largest companies first
+            const sorted = [...brregSeedBuffer].sort((a, b) => b.employees - a.employees);
+            const toEnrich = sorted.slice(0, MAX_NEWS_ENRICHMENT_SEARCHES);
+
+            console.log(`📰 News enrichment: searching for ${toEnrich.length} of ${brregSeedBuffer.length} Brreg leads...`);
+
+            for (const buffered of toEnrich) {
+                try {
+                    const newsResult = await searchNewsContext(buffered.data.company_name);
+                    if (newsResult.hasNews) {
+                        buffered.data.raw_content = (buffered.data.raw_content || buffered.data.excerpt || '') +
+                            '\n\n' + newsResult.newsContext;
+                        console.log(`  ✓ Found news for ${buffered.data.company_name}`);
+                    }
+                    opsCount++; // Count Firecrawl search credit
+                } catch (error) {
+                    results.errors.push(`News enrichment error for ${buffered.data.company_name}: ${error}`);
+                }
+            }
+        }
+
+        // Write all buffered Brreg seeds to Airtable
+        for (const buffered of brregSeedBuffer) {
+            try {
+                await createSeed(buffered.data);
+                results[buffered.resultKey]++;
+            } catch (error) {
+                results.errors.push(`Brreg seed write error: ${error}`);
+            }
+        }
+
+        console.log(`📊 Brreg stages complete: ${brregSeedBuffer.length} seeds buffered and written`);
 
         // 2. Fetch and analyze RSS (DN + E24 + Finansavisen)
         // This uses Gemini tokens.
@@ -309,66 +381,107 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // 3. Targeted Scraping (NewsWeb & Finansavisen Pressemeldinger)
+        // 3a. Euronext Oslo Børs announcements (FREE — Cheerio, replaces NewsWeb Firecrawl scrape)
         if (!checkLimit()) {
-            const pagesToScrape = [
-                { url: 'https://newsweb.oslobors.no/', name: 'NewsWeb' },
-                { url: 'https://www.finansavisen.no/siste/pressemeldinger', name: 'Finansavisen_PR' }
-            ];
+            console.log('Fetching Euronext Oslo Børs announcements (Cheerio)...');
+            try {
+                const announcements = await fetchEuronextAnnouncements();
 
-            for (const page of pagesToScrape) {
-                if (checkLimit()) break;
-                console.log(`Scraping ${page.name}...`);
+                // Build content for Gemini trigger detection from all announcements
+                const announcementText = announcements
+                    .map(a => `${a.company_name}: ${a.title} [${a.industry}] (${a.topic})`)
+                    .join('\n');
 
-                try {
-                    opsCount++; // Counting scrape operation
-                    const scrapeResult = await scrapeUrl(page.url);
-                    if (!scrapeResult.success || !scrapeResult.content) continue;
+                if (announcementText.length > 0) {
+                    opsCount++; // Gemini call
+                    const triggerResult = await detectTriggers(
+                        announcementText,
+                        'stock_exchange_announcement',
+                        'Euronext Oslo Børs'
+                    );
 
-                    opsCount++; // Counting Gemini call
+                    if (!triggerResult.no_trigger_found && triggerResult.triggers_found.length > 0) {
+                        const companyName = triggerResult.company_mentioned.name;
+                        if (companyName && companyName !== 'Unknown') {
+                            const isDuplicate = await checkDuplicate(triggerResult.company_mentioned.org_number || companyName);
+                            if (isDuplicate) {
+                                results.duplicates_skipped++;
+                            } else {
+                                const validTriggers = [
+                                    'LeadershipChange', 'Restructuring', 'MergersAcquisitions', 'StrategicReview',
+                                    'OperationalCrisis', 'RegulatoryLegal', 'CostProgram', 'HiringSignal',
+                                    'OwnershipGovernance', 'TransformationProgram'
+                                ];
+                                const detectedTrigger = triggerResult.triggers_found[0]?.category || 'LeadershipChange';
+                                const finalTrigger = validTriggers.includes(detectedTrigger) ? detectedTrigger : 'LeadershipChange';
+
+                                await createSeed({
+                                    company_name: companyName,
+                                    org_number: triggerResult.company_mentioned.org_number || '',
+                                    source_type: 'newsweb',
+                                    source_url: 'https://live.euronext.com/en/markets/oslo/equities/company-news',
+                                    trigger_detected: finalTrigger,
+                                    excerpt: (triggerResult.triggers_found[0]?.excerpt || '').slice(0, 500),
+                                    raw_content: announcementText.slice(0, 2000),
+                                    collected_at: new Date().toISOString(),
+                                    processed: false
+                                });
+                                results.firecrawl_seeds++; // Reusing counter name
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                results.errors.push(`Euronext scrape error: ${error}`);
+            }
+        }
+
+        // 3b. Finansavisen Pressemeldinger (still uses Firecrawl — 1 credit)
+        if (!checkLimit()) {
+            console.log('Scraping Finansavisen PR...');
+            try {
+                opsCount++; // Firecrawl scrape
+                const scrapeResult = await scrapeUrl('https://www.finansavisen.no/siste/pressemeldinger');
+                if (scrapeResult.success && scrapeResult.content) {
+                    opsCount++; // Gemini call
                     const triggerResult = await detectTriggers(
                         scrapeResult.content,
                         'web_scrape',
-                        page.name
+                        'Finansavisen_PR'
                     );
 
-                    if (triggerResult.no_trigger_found) continue;
+                    if (!triggerResult.no_trigger_found) {
+                        const companyName = triggerResult.company_mentioned.name;
+                        if (companyName && companyName !== 'Unknown') {
+                            const isDuplicate = await checkDuplicate(triggerResult.company_mentioned.org_number || companyName);
+                            if (isDuplicate) {
+                                results.duplicates_skipped++;
+                            } else {
+                                const validTriggers = [
+                                    'LeadershipChange', 'Restructuring', 'MergersAcquisitions', 'StrategicReview',
+                                    'OperationalCrisis', 'RegulatoryLegal', 'CostProgram', 'HiringSignal',
+                                    'OwnershipGovernance', 'TransformationProgram'
+                                ];
+                                const detectedTrigger = triggerResult.triggers_found[0]?.category || 'LeadershipChange';
+                                const finalTrigger = validTriggers.includes(detectedTrigger) ? detectedTrigger : 'LeadershipChange';
 
-                    const companyName = triggerResult.company_mentioned.name;
-                    if (!companyName || companyName === 'Unknown') continue;
-
-                    const isDuplicate = await checkDuplicate(triggerResult.company_mentioned.org_number || companyName);
-                    if (isDuplicate) {
-                        results.duplicates_skipped++;
-                        continue;
+                                await createSeed({
+                                    company_name: companyName,
+                                    org_number: triggerResult.company_mentioned.org_number || '',
+                                    source_type: 'newsweb',
+                                    source_url: 'https://www.finansavisen.no/siste/pressemeldinger',
+                                    trigger_detected: finalTrigger,
+                                    excerpt: (triggerResult.triggers_found[0]?.excerpt || '').slice(0, 500),
+                                    collected_at: new Date().toISOString(),
+                                    processed: false
+                                });
+                                results.firecrawl_seeds++;
+                            }
+                        }
                     }
-
-                    // Map source to Airtable Select options
-                    let mappedSource = 'newsweb';
-
-                    // Ensure trigger matches Airtable Select options
-                    const validTriggers = [
-                        'LeadershipChange', 'Restructuring', 'MergersAcquisitions', 'StrategicReview',
-                        'OperationalCrisis', 'RegulatoryLegal', 'CostProgram', 'HiringSignal',
-                        'OwnershipGovernance', 'TransformationProgram'
-                    ];
-                    const detectedTrigger = triggerResult.triggers_found[0]?.category || 'LeadershipChange';
-                    const finalTrigger = validTriggers.includes(detectedTrigger) ? detectedTrigger : 'LeadershipChange';
-
-                    await createSeed({
-                        company_name: companyName,
-                        org_number: triggerResult.company_mentioned.org_number || '',
-                        source_type: mappedSource,
-                        source_url: page.url,
-                        trigger_detected: finalTrigger,
-                        excerpt: (triggerResult.triggers_found[0]?.excerpt || '').slice(0, 500),
-                        collected_at: new Date().toISOString(),
-                        processed: false
-                    });
-                    results.firecrawl_seeds++;
-                } catch (error) {
-                    results.errors.push(`${page.name} scrape error: ${error}`);
                 }
+            } catch (error) {
+                results.errors.push(`Finansavisen PR scrape error: ${error}`);
             }
         }
 

@@ -7,12 +7,13 @@ import {
     batchCreateEvidence,
     checkDuplicate,
 } from '@/lib/airtable';
-import { CachedBrregLookup } from '@/lib/bronnysund';
+import { CachedBrregLookup, getBrregConfirmation } from '@/lib/bronnysund';
 import { batchProcessSeeds, generateWhyNowBatch, generateSummaryBatch } from '@/lib/gemini';
 import { searchCorroboration } from '@/lib/search';
-import { scrapeUrl } from '@/lib/firecrawl';
+import { scrapeUrl, resetFirecrawlBudget, getFirecrawlStats } from '@/lib/firecrawl';
 import { getScoringWeights } from '@/config/scoring-config';
 import { logger } from '@/lib/logger';
+import { groupSeedsByCompany } from '@/lib/corroboration';
 
 // ============================================
 // CONFIGURATION
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
     if (authError) return authError;
 
     const startTime = Date.now();
-    const apiCallsUsed = { gemini: 0, bronnysund: 0, airtable: 0 };
+    const apiCallsUsed = { gemini: 0, bronnysund: 0, airtable: 0, firecrawl: 0 };
 
     // Mode: production (max 10, stars only) or test (max 25, full scores)
     const { searchParams } = new URL(request.url);
@@ -72,36 +73,39 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        logger.info(`📥 Processing ${unprocessedSeeds.length} seeds in batch mode`, { mode, component: 'process-esl' });
+        // 2. Cross-source corroboration: group seeds by company
+        const seedGroups = groupSeedsByCompany(unprocessedSeeds);
+        logger.info(`📥 Processing ${unprocessedSeeds.length} seeds → ${seedGroups.length} company groups`, { mode, component: 'process-esl' });
 
-        // 2. Brønnøysund: Batch lookup med caching
-        const orgNumbers = [...new Set(unprocessedSeeds.map(s => s.org_number).filter((n): n is string => !!n))];
+        // 3. Brønnøysund: Batch lookup med caching
+        const orgNumbers = [...new Set(seedGroups.map(g => g.canonical_org_number).filter(Boolean))];
         const brregCache = new CachedBrregLookup();
         const brregData = await brregCache.batchLookup(orgNumbers);
         apiCallsUsed.bronnysund += brregCache.getApiCallCount();
 
-        // 3. Initial scoring & Verification
-        const caseFilesData = await Promise.all(unprocessedSeeds.map(async (seed) => {
+        // 4. Initial scoring & Verification (per group, not per seed)
+        const caseFilesData = await Promise.all(seedGroups.map(async (group) => {
+            const seed = group.primary_seed;
             const sourceType = seed.source_type || 'default';
             const scores = SCORING_WEIGHTS[sourceType] || SCORING_WEIGHTS.default;
 
             // Try org number lookup first, fall back to name search
-            let company = seed.org_number ? (brregData.get(seed.org_number.replace(/\s/g, '')) || null) : null;
-            if (!company && seed.company_name) {
-                company = await brregCache.searchByName(seed.company_name);
+            let company = group.canonical_org_number ? (brregData.get(group.canonical_org_number.replace(/\s/g, '')) || null) : null;
+            if (!company && group.canonical_name) {
+                company = await brregCache.searchByName(group.canonical_name);
                 if (company && mode === 'test') {
-                    logger.audit(`Name search match: "${seed.company_name}" → ${company.navn} (${company.organisasjonsnummer})`, { mode, component: 'process-esl' });
+                    logger.audit(`Name search match: "${group.canonical_name}" → ${company.navn} (${company.organisasjonsnummer})`, { mode, component: 'process-esl' });
                 }
             }
 
             const verification = CachedBrregLookup.verify(company);
 
             if (mode === 'test') {
-                logger.audit(`Verification for ${seed.company_name}: ${JSON.stringify(verification)}`, { mode, component: 'process-esl' });
+                logger.audit(`Verification for ${group.canonical_name}: ${JSON.stringify(verification)}`, { mode, component: 'process-esl' });
             }
 
             // Use resolved org number (from seed or name search)
-            const resolvedOrgNumber = seed.org_number || company?.organisasjonsnummer || '';
+            const resolvedOrgNumber = group.canonical_org_number || company?.organisasjonsnummer || '';
 
             // Anti-repetition: Addendum §4 — dedup key is (company, trigger, role)
             const trigger = seed.trigger_detected || 'LeadershipChange';
@@ -111,21 +115,50 @@ export async function POST(request: NextRequest) {
                 : false;
 
             if (isDuplicate && mode === 'test') {
-                logger.audit(`Duplicate detected: ${seed.company_name} (${trigger}, ${role})`, { mode, component: 'process-esl' });
+                logger.audit(`Duplicate detected: ${group.canonical_name} (${trigger}, ${role})`, { mode, component: 'process-esl' });
+            }
+
+            // Apply corroboration boost for multi-source leads
+            const E_initial = Math.min(1.0, scores.E0 + group.corroboration_boost);
+            const W_initial = Math.min(1.0, scores.W0 + group.corroboration_boost);
+
+            // For multi-source groups, use merged content so Gemini sees all context
+            const effectiveSeed = { ...seed };
+            if (group.source_count > 1) {
+                effectiveSeed.raw_content = group.merged_raw_content;
+                effectiveSeed.excerpt = `[${group.source_count} kilder] ${seed.excerpt || ''}`;
+                if (mode === 'test') {
+                    logger.audit(`Corroborated: ${group.canonical_name} from ${group.source_types.join(', ')} (boost: +${group.corroboration_boost.toFixed(2)})`, { mode, component: 'process-esl' });
+                }
+            }
+
+            // For non-Brreg seeds: append Brreg confirmation/profile for richer Gemini context
+            const isBrregSource = sourceType.startsWith('brreg') || sourceType === 'bronnysund';
+            if (!isBrregSource && company) {
+                const confirmation = getBrregConfirmation(company);
+                if (confirmation.confirms_crisis) {
+                    effectiveSeed.raw_content = (effectiveSeed.raw_content || effectiveSeed.excerpt || '') +
+                        `\n\nBRREG BEKREFTER: ${confirmation.crisis_signals.join(', ')}. ${confirmation.company_profile}`;
+                } else if (confirmation.company_profile) {
+                    effectiveSeed.raw_content = (effectiveSeed.raw_content || effectiveSeed.excerpt || '') +
+                        `\n\nBRREG PROFIL: ${confirmation.company_profile}`;
+                }
             }
 
             return {
-                seed: { ...seed },
-                company_name: seed.company_name || company?.navn || 'Unknown',
+                seed: effectiveSeed,
+                company_name: group.canonical_name || company?.navn || 'Unknown',
                 org_number: resolvedOrgNumber,
-                E: scores.E0,
-                W: scores.W0,
+                E: E_initial,
+                W: W_initial,
                 V: verification.V,
                 R: scores.R0,
                 brreg_data: company,
                 verification,
                 is_duplicate: isDuplicate,
                 status: 'processing' as const,
+                source_count: group.source_count,
+                merged_triggers: group.merged_triggers,
             };
         }));
 
@@ -191,6 +224,47 @@ export async function POST(request: NextRequest) {
         );
         const cappedQualified = sortedQualified.slice(0, maxLeads);
 
+        // 6b. Deep content scrape for qualified leads (1 Firecrawl credit each)
+        // Only scrape specific article URLs — not listing pages or API endpoints
+        const LISTING_URL_PATTERNS = [
+            'euronext.com/en/markets',
+            'newsweb.oslobors.no',
+            '/api/',
+            'data.brreg.no',
+        ];
+
+        if (cappedQualified.length > 0) {
+            resetFirecrawlBudget();
+            let deepScrapedCount = 0;
+
+            for (const c of cappedQualified) {
+                const sourceUrl = c.seed.source_url;
+                if (!sourceUrl) continue;
+
+                // Skip listing pages and API URLs — only scrape actual articles
+                const isListingPage = LISTING_URL_PATTERNS.some(p => sourceUrl.includes(p));
+                if (isListingPage) continue;
+
+                logger.info(`📰 Deep scraping for ${c.company_name}: ${sourceUrl.slice(0, 80)}...`, { mode, component: 'process-esl' });
+                const scrapeResult = await scrapeUrl(sourceUrl);
+
+                if (scrapeResult.success && scrapeResult.content) {
+                    // Truncate to keep context manageable for Gemini
+                    const truncated = scrapeResult.content.length > 3000
+                        ? scrapeResult.content.slice(0, 3000) + '\n\n[...trunkert]'
+                        : scrapeResult.content;
+
+                    c.seed.raw_content = (c.seed.raw_content || '') +
+                        `\n\nFULL ARTIKKEL (${sourceUrl}):\n${truncated}`;
+                    deepScrapedCount++;
+                }
+            }
+
+            const stats = getFirecrawlStats();
+            logger.info(`📰 Deep scrape complete: ${deepScrapedCount}/${cappedQualified.length} leads enriched (${stats.credits_used} Firecrawl credits)`, { mode, component: 'process-esl' });
+            apiCallsUsed.firecrawl = stats.credits_used;
+        }
+
         // 7. BATCH generer Why Now og Oppsummering for ALLE kvalifiserte i denne batchen
         let whyNowTexts: Map<string, string> = new Map();
         let summaries: Map<string, string> = new Map();
@@ -226,6 +300,7 @@ export async function POST(request: NextRequest) {
                     is_ostlandet: c.verification.is_ostlandet,
                     has_operations: c.verification.has_operations,
                     source_type: c.seed.source_type,
+                    source_url: c.seed.source_url || '',
                     case_summary: summaries.get(c.org_number) || c.seed.excerpt || c.seed.raw_content?.slice(0, 500) || '',
                 };
             }));

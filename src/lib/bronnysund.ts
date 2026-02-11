@@ -64,9 +64,31 @@ export interface BrregCompany {
 const cache = new Map<string, { data: BrregCompany | null; expires: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 timer
 
-// Minimum employees for status updates (avvikling/konkurs) to be worth processing
-// 0-employee companies under avvikling are typically dormant shell companies
-const MIN_EMPLOYEES_FOR_STATUS_UPDATE = 1;
+// Minimum employees for Brreg seeds to be worth processing as interim leadership leads
+// Companies under 30 employees rarely warrant interim C-level leadership
+const MIN_EMPLOYEES_FOR_BRREG_SEED = 30;
+
+// Organization forms that are never interim leadership opportunities
+const EXCLUDED_ORG_FORMS = ['ENK', 'DA', 'ANS']; // Sole proprietorships, partnerships
+
+/**
+ * Check if a Brreg company is a viable interim leadership lead
+ * Filters out tiny companies and unsuitable org forms
+ */
+export function isViableBrregLead(company: BrregCompany | null): { viable: boolean; reason: string } {
+    if (!company) return { viable: false, reason: 'Company not found in Brreg' };
+
+    if (EXCLUDED_ORG_FORMS.includes(company.organisasjonsform?.kode)) {
+        return { viable: false, reason: `Excluded org form: ${company.organisasjonsform.kode}` };
+    }
+
+    const employees = company.antallAnsatte ?? 0;
+    if (employees < MIN_EMPLOYEES_FOR_BRREG_SEED) {
+        return { viable: false, reason: `Only ${employees} employees (min ${MIN_EMPLOYEES_FOR_BRREG_SEED})` };
+    }
+
+    return { viable: true, reason: 'OK' };
+}
 
 /**
  * Cached Brønnøysund lookup klasse
@@ -651,10 +673,15 @@ export async function fetchBrregUpdates(days: number = 2): Promise<BrregUpdateRe
             continue;
         }
 
-        // Skip low-employee companies for status updates (avvikling/konkurs)
-        // These are typically dormant shell companies with no interim leadership need
+        // Skip org forms that never need interim leadership (sole proprietorships, partnerships)
+        if (company?.organisasjonsform?.kode && EXCLUDED_ORG_FORMS.includes(company.organisasjonsform.kode)) {
+            skippedLowEmployee++;
+            continue;
+        }
+
+        // Skip companies with < 30 employees — too small for interim C-level leadership
         const employees = company?.antallAnsatte || 0;
-        if (employees < MIN_EMPLOYEES_FOR_STATUS_UPDATE) {
+        if (employees < MIN_EMPLOYEES_FOR_BRREG_SEED) {
             skippedLowEmployee++;
             continue;
         }
@@ -684,7 +711,7 @@ export async function fetchBrregUpdates(days: number = 2): Promise<BrregUpdateRe
 
     // Log filtering summary
     if (skippedLowEmployee > 0 || skippedNotOstlandet > 0) {
-        console.log(`📊 Brreg filter: skipped ${skippedLowEmployee} (<${MIN_EMPLOYEES_FOR_STATUS_UPDATE} employees), ${skippedNotOstlandet} (not Østlandet)`);
+        console.log(`📊 Brreg filter: skipped ${skippedLowEmployee} (<${MIN_EMPLOYEES_FOR_BRREG_SEED} employees), ${skippedNotOstlandet} (not Østlandet)`);
     }
     console.log(`📊 Brreg Update Monitor: ${results.length} signals found`);
     return results;
@@ -758,4 +785,36 @@ export function enrichBrregSeed(seed: any, enhet: BrregCompany | null): string {
     }
 
     return parts.join(' ');
+}
+
+/**
+ * Generates a Brreg confirmation string for non-Brreg leads.
+ * When a news article mentions a company, this adds official registry context.
+ */
+export function getBrregConfirmation(company: BrregCompany | null): {
+    confirms_crisis: boolean;
+    crisis_signals: string[];
+    company_profile: string;
+} {
+    if (!company) {
+        return { confirms_crisis: false, crisis_signals: [], company_profile: '' };
+    }
+
+    const signals: string[] = [];
+    if (company.konkurs) signals.push('Registrert konkurs');
+    if (company.underAvvikling) signals.push('Under avvikling');
+    if (company.underTvangsavviklingEllerTvangsopplosning) signals.push('Under tvangsoppløsning');
+
+    const employees = company.antallAnsatte ?? 0;
+    const industry = company.naeringskode1?.beskrivelse || 'ukjent bransje';
+    const location = company.forretningsadresse?.kommune || company.forretningsadresse?.poststed || 'ukjent';
+    const orgForm = company.organisasjonsform?.beskrivelse || '';
+
+    const profile = `${company.navn}: ${employees} ansatte, ${industry}, ${location}${orgForm ? `, ${orgForm}` : ''}`;
+
+    return {
+        confirms_crisis: signals.length > 0,
+        crisis_signals: signals,
+        company_profile: profile,
+    };
 }
