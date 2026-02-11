@@ -63,7 +63,7 @@ export async function scrapeNewsWebListing(): Promise<NewsWebResult> {
 
     if (!triggerResult.no_trigger_found && triggerResult.triggers_found.length > 0) {
         // Match triggers back to announcements
-        triggerResult.triggers_found.forEach(trigger => {
+        triggerResult.triggers_found.forEach((trigger: { category: string; excerpt: string }) => {
             const excerpt = trigger.excerpt || '';
             const matchingAnnouncement = announcements.find(a =>
                 excerpt.toLowerCase().includes(a.company_name.toLowerCase()) ||

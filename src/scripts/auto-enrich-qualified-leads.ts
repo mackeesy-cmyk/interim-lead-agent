@@ -70,20 +70,17 @@ async function autoEnrichQualifiedLeads() {
         console.log(`   Trigger: ${f.trigger_hypothesis}`);
 
         // Search for news context
-        const newsContext = await searchNewsContext(
-            f.company_name,
-            f.trigger_hypothesis || 'leadership change'
-        );
+        const newsResult = await searchNewsContext(f.company_name);
 
-        if (!newsContext || newsContext.length < 100) {
+        if (!newsResult.hasNews || newsResult.newsContext.length < 100) {
             console.log(`   ⚠️  No relevant news found, skipping`);
             continue;
         }
 
-        console.log(`   ✅ Found news context: ${newsContext.length} chars`);
+        console.log(`   ✅ Found news context: ${newsResult.newsContext.length} chars`);
 
         // Combine original + news context
-        const enhancedContent = `${f.case_summary || f.excerpt || ''}\n\nNYHETSKONTEKST:\n${newsContext}`;
+        const enhancedContent = `${f.case_summary || f.excerpt || ''}\n\nNYHETSKONTEKST:\n${newsResult.newsContext}`;
 
         // Regenerate analysis with enhanced content
         const company = companyData.get(f.org_number) || null;
